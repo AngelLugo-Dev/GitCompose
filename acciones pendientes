@@ -1,0 +1,649 @@
+==============================================================================
+       ACCIONES PENDIENTES - PROCEDIMIENTOS CON COMANDOS Y RIESGOS
+==============================================================================
+
+Este documento contiene los procedimientos exactos para tres acciones
+pendientes en el despliegue de Forgejo. Cada accion incluye que hace, por
+que es necesaria, el riesgo concreto sobre los datos, los comandos en
+orden, la validacion al final y como revertir si algo no resulta.
+
+Los tres procedimientos comparten un patron tecnico muy similar y se
+basan en el mismo gesto de Docker Compose: editar el archivo de
+configuracion, recrear unicamente el contenedor de Forgejo, y verificar
+el resultado. La razon por la que se agrupan en este archivo es porque
+el riesgo de los tres es comparable, y conviene entender el patron una
+vez para aplicarlo con confianza tres veces.
+
+Indice de acciones.
+
+   Accion 1.  Personalizar el nombre y el lema de la empresa en la
+              interfaz publica del sitio.
+
+   Accion 2.  Habilitar el envio de correo (SMTP) para invitaciones,
+              confirmaciones y notificaciones.
+
+   Accion 3.  Invitar usuarios nuevos con el procedimiento corregido,
+              sustituyendo al flujo que originalmente describi mal y
+              que tiene un bug conocido en esta version de Forgejo.
+
+   Accion 4.  Configurar mirror inverso opcional desde Forgejo hacia
+              Bitbucket, util como respaldo automatico durante el
+              periodo de gracia posterior al corte de Bitbucket.
+
+
+==============================================================================
+                EL PATRON GENERAL DE RIESGO Y RECREATE
+==============================================================================
+
+Las tres acciones de este documento aplican cambios sobre el contenedor
+de Forgejo, no sobre la base de datos. Eso es muy importante para
+entender el riesgo real.
+
+Cuando se ejecuta
+
+    docker compose -f docker-compose.prod.yml up -d --force-recreate server
+
+Docker hace tres cosas en este orden. Primero detiene el contenedor
+llamado server (el de Forgejo, no la base de datos ni el reverse proxy).
+Segundo lo elimina, sin tocar los volumenes de disco que tiene
+montados ( forgejo_data  con repos y subidas, y la conexion a la base
+externa). Tercero crea un contenedor nuevo a partir de la misma imagen
+y los mismos volumenes, pero leyendo otra vez todas las variables de
+entorno y el archivo .env. El contenedor recien creado vuelve a
+montar  forgejo_data  intacto y se conecta a la misma base Postgres,
+que tampoco fue tocada.
+
+El downtime tipico de este recreate es de diez a veinte segundos. En
+ese intervalo, los usuarios que esten haciendo  git push  o navegando
+la UI ven una respuesta tipo "502 Bad Gateway" del reverse proxy, que
+desaparece sola en cuanto Forgejo termina de arrancar. Las sesiones
+activas no se invalidan porque viven en la base de datos.
+
+El riesgo de perdida de datos en este patron es nulo, siempre que no se
+ejecuten en su lugar los siguientes comandos peligrosos, que NO son
+necesarios para ninguna de las tres acciones de este documento:
+
+    docker compose ... down -v       (borra volumenes)
+    sudo rm -rf forgejo_data         (borra repos)
+    sudo rm -rf postgres_data        (borra la base)
+
+Mientras se respete el patron documentado, no hay forma de perder
+informacion. El peor escenario practico es que un valor mal escrito en
+el archivo .env haga que Forgejo no arranque y reporte error de
+configuracion en los logs. En ese caso el rollback es trivial: corregir
+el valor en .env y volver a recrear.
+
+
+==============================================================================
+              ACCION 1 - PERSONALIZAR EL NOMBRE DE LA EMPRESA
+==============================================================================
+
+Resumen del cambio.
+   Sustituir el texto generico "Forgejo: Beyond coding. We forge." que
+   aparece en varias partes de la interfaz por el nombre y lema de
+   Clever Cloud.
+
+Por que es necesario.
+   En el despliegue actual, la instalacion se hizo con  INSTALL_LOCK=true
+   y todas las variables vinieron por entorno desde Docker. Eso evito
+   que se mostrara el wizard inicial de Forgejo, que es el unico lugar
+   donde la interfaz pregunta el nombre del sitio. Como la variable
+   APP_NAME nunca se especifico, quedo en el valor por defecto.
+
+Que cambia visualmente despues de aplicarlo.
+   El titulo de la pestana del navegador en cualquier pagina del sitio.
+   El nombre que aparece junto al logo en la parte superior izquierda.
+   El texto del pie de pagina del sitio. La pagina de login. La firma
+   por defecto de los correos que manda el sistema (cuando el SMTP este
+   activo). El asunto de los correos de bienvenida y notificaciones.
+
+Riesgo sobre los datos.
+   Nulo. APP_NAME y APP_SLOGAN son variables puramente cosmeticas que
+   afectan strings de la interfaz. No tocan repositorios, ni usuarios,
+   ni issues, ni la base de datos.
+
+Riesgo operativo.
+   Diez a veinte segundos de downtime durante el recreate del
+   contenedor server. Caddy y Postgres no se reinician.
+
+Prerequisitos.
+   Estar con sesion SSH abierta en el droplet como usuario  angel  y
+   parado en el directorio  /opt/forgejo .
+
+Procedimiento paso a paso.
+
+   Paso 1. Abrir el archivo de Docker Compose con un editor.
+
+       nano /opt/forgejo/docker-compose.prod.yml
+
+   Paso 2. Localizar la seccion  environment  del servicio  server  y
+           agregar dos lineas nuevas. Conviene agregarlas justo debajo
+           de la linea  USER_GID=1000  para mantener un orden logico.
+           El bloque debe quedar asi al final:
+
+               environment:
+                 - USER_UID=1000
+                 - USER_GID=1000
+                 - FORGEJO____APP_NAME=Clever Cloud
+                 - FORGEJO____APP_SLOGAN=Plataforma Git interna de Clever Cloud
+                 # ... el resto de variables se mantiene igual
+
+           Importante. Forgejo mapea variables de entorno a secciones
+           del archivo de configuracion app.ini con la sintaxis
+           FORGEJO__<seccion>__<clave> . APP_NAME y APP_SLOGAN viven en
+           la seccion sin encabezado de app.ini (la seccion raiz, que
+           en sintaxis de variables de entorno se representa como
+           seccion vacia entre los separadores). Por eso aparecen
+           cuatro guiones bajos seguidos en  FORGEJO____APP_NAME : dos
+           para el primer separador, cero para el nombre de seccion y
+           dos para el segundo separador. Esta es la convencion que
+           usa el Capitulo 11 del MANUAL.txt y la documentacion
+           oficial de Forgejo a partir de v15.
+
+   Paso 3. Guardar el archivo y salir del editor con Ctrl+O, Enter,
+           Ctrl+X.
+
+   Paso 4. Validar que el YAML siga siendo valido antes de aplicar el
+           cambio. Este paso es importante porque un error de
+           indentacion en YAML puede dejar el archivo sintacticamente
+           roto sin que sea evidente a la vista.
+
+       cd /opt/forgejo
+       docker compose -f docker-compose.prod.yml config >/dev/null
+
+           Si el comando termina sin imprimir nada y devuelve codigo de
+           salida 0, el YAML es valido. Si imprime un error, no
+           continuar al paso 5: regresar al paso 1, corregir, y volver
+           a validar.
+
+   Paso 5. Aplicar el cambio recreando solo el contenedor server.
+
+       docker compose -f docker-compose.prod.yml up -d --force-recreate server
+
+           Salida esperada:
+              Container clevercloud-forgejo  Recreate
+              Container clevercloud-forgejo  Recreated
+              Container clevercloud-forgejo  Starting
+              Container clevercloud-forgejo  Started
+
+   Paso 6. Esperar veinte segundos a que Forgejo termine de arrancar y
+           verificar el estado.
+
+       docker compose -f docker-compose.prod.yml ps
+
+           El contenedor clevercloud-forgejo debe aparecer  Up  con la
+           condicion  (healthy) . Si dice  (health: starting)  esperar
+           un poco mas y volver a consultar.
+
+Validacion del resultado.
+   En cualquier navegador, abrir  https://gitserver.clevercloud.app  y
+   confirmar visualmente: el titulo de la pestana del navegador ahora
+   dice "Clever Cloud" o variantes con esa cadena, y el lema aparece
+   en la pagina de login. Si todavia se ve "Forgejo: Beyond coding",
+   limpiar el cache del navegador con Ctrl+F5 y volver a cargar.
+
+Reversion.
+   Quitar las dos lineas que se agregaron en el paso 2 del archivo
+   docker-compose.prod.yml, validar con  docker compose ... config , y
+   recrear con  docker compose ... up -d --force-recreate server .
+   El sitio vuelve al texto por defecto en menos de un minuto.
+
+
+==============================================================================
+              ACCION 2 - HABILITAR EL ENVIO DE CORREO (SMTP)
+==============================================================================
+
+Resumen del cambio.
+   Completar las tres variables SMTP que se dejaron vacias durante el
+   despliegue inicial, conectando Forgejo al servidor de correo
+   corporativo.
+
+Por que es necesario.
+   Sin SMTP activo, el sistema funciona internamente pero no manda
+   ningun correo al exterior. Eso bloquea cualquier flujo que dependa
+   del email: la confirmacion de cuenta despues de un alta (que en
+   este despliegue es obligatoria por  REGISTER_EMAIL_CONFIRM=true ),
+   la recuperacion de contrasena olvidada por parte de los usuarios,
+   las notificaciones de issues y pull requests, las menciones a
+   companeros en comentarios, y los correos de bienvenida cuando el
+   admin crea una cuenta nueva.
+
+Que se habilita despues de aplicarlo.
+   El boton "Send Testing Email" en Site Administration empieza a
+   funcionar. La creacion de cuentas desde el panel de admin con la
+   opcion de notificar al usuario empieza a entregar correos. La
+   pagina de "Forgot password" empieza a generar enlaces validos. Las
+   notificaciones de actividad empiezan a llegar a la bandeja de los
+   usuarios suscritos.
+
+Riesgo sobre los datos.
+   Nulo. La configuracion SMTP es una conexion saliente. No modifica
+   ni un solo registro de la base de datos.
+
+Riesgo operativo.
+   Diez a veinte segundos de downtime durante el recreate. Hay un
+   modo de fallo silencioso que conviene conocer: si las credenciales
+   SMTP estan mal escritas o el App Password es incorrecto, Forgejo
+   arranca igual y el sitio responde normal, pero los correos
+   simplemente no llegan. Por eso el paso de validacion al final no es
+   opcional.
+
+Prerequisitos antes de iniciar.
+   Tener en mano la direccion de correo corporativo definitiva (la que
+   va a aparecer como remitente del sistema, por ejemplo
+   devops@clevercloud.mx ) y el App Password de 16 caracteres
+   asociado a esa cuenta. Si la cuenta es de Google Workspace, el App
+   Password se genera en https://myaccount.google.com/apppasswords ; la
+   cuenta debe tener 2FA activado para que esa opcion aparezca.
+   Importante. La contrasena normal de la cuenta de Gmail o Workspace
+   no funciona aqui. Forzosamente debe ser un App Password.
+
+Procedimiento paso a paso.
+
+   Paso 1. Abrir el archivo de variables de entorno con un editor.
+
+       nano /opt/forgejo/.env
+
+   Paso 2. Localizar las tres lineas que estan vacias y completarlas
+           con los valores reales. Antes:
+
+               SMTP_USER=
+               SMTP_PASS=
+               SMTP_FROM=
+
+           Despues:
+
+               SMTP_USER=devops@clevercloud.mx
+               SMTP_PASS=abcdefghijklmnop
+               SMTP_FROM="Clever Cloud Git <devops@clevercloud.mx>"
+
+           Notas. El App Password se introduce sin espacios, aunque
+           Google lo presente con espacios cada cuatro caracteres.
+           El campo  SMTP_FROM  acepta el formato extendido entre
+           comillas con un nombre legible y la direccion entre signos
+           menor y mayor; ese formato es el que aparece como remitente
+           en los buzones de los destinatarios.
+
+   Paso 3. Guardar con Ctrl+O, Enter, Ctrl+X.
+
+   Paso 4. Confirmar que los permisos del archivo siguen siendo
+           restrictivos. Este archivo contiene secretos y solo el
+           operador debe poder leerlo.
+
+       ls -l /opt/forgejo/.env
+
+           La salida debe empezar con  -rw-------  y mostrar al
+           usuario  angel  como propietario. Si por alguna razon los
+           permisos cambiaron, restablecerlos con
+
+       chmod 600 /opt/forgejo/.env
+
+   Paso 5. Validar el YAML completo (verifica que la sustitucion de
+           variables del .env contra el docker-compose funciona).
+
+       cd /opt/forgejo
+       docker compose -f docker-compose.prod.yml config >/dev/null
+
+   Paso 6. Aplicar el cambio recreando solo el contenedor server.
+
+       docker compose -f docker-compose.prod.yml up -d --force-recreate server
+
+   Paso 7. Esperar veinte segundos y revisar los logs del contenedor
+           server. Es la primera oportunidad de detectar errores de
+           autenticacion SMTP, que aparecen como mensajes de la
+           categoria mailer en el log.
+
+       docker compose -f docker-compose.prod.yml logs --tail=100 server | grep -i mail
+
+           Ningun resultado en este momento es buen sintoma: significa
+           que el cliente SMTP esta cargado y silencioso, listo para
+           cuando se le pida enviar un correo. Si aparece un mensaje
+           con la palabra  error ,  fail  o  authentication , revisar
+           el App Password en el paso 2.
+
+Validacion del resultado.
+   La validacion definitiva se hace desde la interfaz, no desde la
+   linea de comandos. Login en  https://gitserver.clevercloud.app  con
+   la cuenta  clever-root . Abrir el menu de avatar, entrar en Site
+   Administration, ir a Configuration, ir a la pestana Mailer. En la
+   parte inferior de esa pagina hay un boton "Send Testing Email";
+   debajo hay un campo donde se escribe la direccion de prueba.
+   Escribir una direccion a la que se tenga acceso (puede ser la misma
+   del operador) y pulsar el boton.
+
+   El correo de prueba debe llegar a la bandeja en menos de un minuto.
+   Si no llega, esperar dos minutos mas (a veces los servicios anti-spam
+   demoran), revisar la carpeta de spam, y solo despues volver al log
+   del contenedor server para diagnosticar.
+
+Reversion.
+   Vaciar las tres variables que se completaron, dejandolas como
+   strings vacios igual que estaban antes (los signos igual sin valor
+   despues), validar con  docker compose ... config , y recrear con
+   docker compose ... up -d --force-recreate server . El sistema
+   vuelve a estar sin SMTP, igual que antes del cambio. Los correos
+   en transito que ya hubieran sido aceptados por el servidor SMTP
+   antes del rollback no se cancelan (el servidor de Google ya los
+   tiene). Los correos posteriores al rollback no se generan.
+
+
+==============================================================================
+       ACCION 3 - INVITAR USUARIOS NUEVOS (PROCEDIMIENTO CORREGIDO)
+==============================================================================
+
+ADVERTENCIA IMPORTANTE - CORRECCION A INFORMACION ANTERIOR.
+   En conversaciones previas y en el procedimiento M5 del manual
+   anterior, indique que para invitar usuarios bastaba con ir a
+   "Organization CleverCloud, Members, Invite Someone". Tras
+   verificar la documentacion oficial de Forgejo 9 y revisar el
+   issue tracker del proyecto en Codeberg, encontre que esa
+   informacion era incorrecta para nuestro despliegue.
+
+   En Forgejo 9, cuando la opcion  DISABLE_REGISTRATION=true  esta
+   activa (que es nuestro caso, configurado en docker-compose por
+   politica de seguridad para impedir altas anonimas), el flujo
+   "Invite Someone" tiene un bug abierto: el invitado recibe el
+   correo, pero al hacer clic en el enlace no puede registrarse
+   porque la pagina de registro esta deshabilitada. Aunque el
+   administrador cree manualmente la cuenta a posteriori, el invitado
+   no queda agregado a la organizacion. Es el issue numero 9009 del
+   repositorio  forgejo/forgejo  en Codeberg, abierto y sin version
+   que lo arregle al momento de redactar este documento (referido a
+   v9).
+
+   Nota de revalidacion para v15.
+      El despliegue se actualizo a Forgejo v15.0.2 el 19 de mayo de
+      2026 (Capitulo 11 del MANUAL.txt). Entre v9 y v15 hay seis
+      ramas mayores de diferencia, y es muy posible que el bug 9009
+      haya sido corregido en alguna release intermedia. Antes de
+      seguir aplicando el flujo de dos pasos descrito en esta Accion
+      como unica opcion, conviene probar el boton "Invite Someone"
+      con una cuenta de test. Si en v15 ya entrega el correo
+      correctamente y el invitado queda agregado al team al
+      registrarse, el flujo de un solo paso vuelve a estar
+      disponible y esta Accion se puede simplificar. Mientras la
+      prueba no se haga, el flujo de dos pasos sigue siendo la via
+      conservadora y segura.
+
+   El flujo correcto y soportado tiene dos pasos en lugar de uno:
+   primero el administrador crea la cuenta del usuario, y solo
+   despues lo agrega como miembro del team de la organizacion. La
+   invitacion no se manda como un solo correo de "join the
+   organization"; se manda como un correo de "tu cuenta esta lista,
+   define tu contrasena", y la pertenencia al team queda
+   pre-asignada por el admin.
+
+Riesgo sobre los datos.
+   Nulo. Crear un usuario y asignarlo a un team no afecta a los
+   repositorios, los usuarios existentes, ni los datos en general.
+
+Prerequisito tecnico.
+   La accion 2 (SMTP funcional) tiene que estar completada antes de
+   este procedimiento. Sin SMTP, el correo de bienvenida no llega y
+   el usuario no tiene forma de definir su contrasena. Si por alguna
+   razon es indispensable invitar a alguien antes de tener SMTP,
+   existe un procedimiento alternativo en linea de comandos que se
+   describe al final de esta seccion.
+
+Procedimiento principal via interfaz.
+
+   Paso 1. Login en  https://gitserver.clevercloud.app  con la cuenta
+           clever-root  o cualquier otra con permisos de
+           administrador del sitio.
+
+   Paso 2. Abrir el menu del avatar (esquina superior derecha) y
+           entrar en Site Administration. Esto exige permisos de
+           administrador del sitio; los Owners de la organizacion no
+           tienen acceso a este panel.
+
+   Paso 3. En la barra lateral, abrir Identity & Access, despues
+           Users.
+
+   Paso 4. Pulsar el boton "Create User Account" en la parte
+           superior derecha de la lista de usuarios.
+
+   Paso 5. Llenar el formulario con los datos del nuevo usuario.
+           Recomendaciones por campo:
+
+               Authentication Source.  Local
+               Username.               primer nombre y apellido en
+                                       minusculas, separados por guion
+                                       (por ejemplo  juan-perez )
+               Email Address.          el correo corporativo o
+                                       personal del usuario, segun
+                                       politica de la empresa
+               Password.               dejar vacio para que Forgejo
+                                       genere una aleatoria fuerte, o
+                                       teclear una temporal que se
+                                       comunicara por canal seguro
+               Require user to change  marcado
+               password at first login
+
+   Paso 6. Pulsar el boton "Create User Account" al final del
+           formulario. Forgejo crea la cuenta y, con el SMTP activo,
+           envia el correo de bienvenida que contiene un enlace para
+           definir la contrasena (si se dejo vacia) y una segunda
+           verificacion de email obligatoria por la politica
+           REGISTER_EMAIL_CONFIRM=true .
+
+   Paso 7. Volver a la pagina principal y entrar en la organizacion
+           CleverCloud. Abrir la pestana Teams.
+
+   Paso 8. Pulsar el nombre del team al que se va a agregar al nuevo
+           usuario (por ejemplo Developers, QA o ReleaseManagers).
+
+   Paso 9. En la pagina del team, en la seccion "Team Members", hay
+           un campo de busqueda con etiqueta "Add team member".
+           Escribir el username recien creado. El autocompletado
+           muestra el usuario; pulsarlo y despues pulsar "Add Team
+           Member".
+
+   Paso 10. El usuario aparece ya en el listado del team con sus
+            permisos heredados.
+
+Que ve el invitado en su correo.
+   El asunto es similar a "Welcome to Clever Cloud" cuando APP_NAME
+   esta personalizado, o "Welcome" en su defecto. El cuerpo contiene
+   un enlace para definir la contrasena (si la cuenta se creo sin
+   especificar una). Despues de definir la contrasena, el sistema
+   pide la verificacion del correo, que es un segundo enlace que
+   llega por separado. Una vez verificado, el usuario puede entrar al
+   sitio y ya tiene acceso a los repositorios del team al que fue
+   asignado, sin pasos adicionales.
+
+Procedimiento alternativo via linea de comandos (sin SMTP).
+   Si por alguna razon es necesario crear un usuario antes de tener
+   SMTP funcionando, se puede generar la cuenta desde la CLI de
+   Forgejo dentro del contenedor server. La diferencia es que el
+   correo de bienvenida no se envia, y la contrasena aleatoria se
+   imprime en pantalla; el operador la entrega al usuario por canal
+   seguro (gestor de contrasenas compartido o mensaje cifrado).
+
+       cd /opt/forgejo
+       docker compose -f docker-compose.prod.yml exec -u 1000 server \
+         forgejo admin user create \
+           --username juan-perez \
+           --email juan@empresa.com \
+           --random-password \
+           --must-change-password
+
+   Despues, desde la interfaz, agregar el usuario al team siguiendo
+   los pasos 7 al 10 del procedimiento principal.
+
+Reversion (eliminar un usuario creado por error).
+   Desde la interfaz, en Site Administration, Users, encontrar al
+   usuario, abrir su perfil de admin y pulsar Delete User. Si se
+   prefiere la linea de comandos:
+
+       docker compose -f docker-compose.prod.yml exec -u 1000 server \
+         forgejo admin user delete --username juan-perez
+
+   Eliminar un usuario no afecta a los repositorios de la
+   organizacion porque estos pertenecen a CleverCloud, no al usuario.
+   Solo se pierden las preferencias personales y los tokens de
+   acceso del usuario eliminado.
+
+
+==============================================================================
+       ACCION 4 - MIRROR INVERSO (FORGEJO HACIA BITBUCKET, OPCIONAL)
+==============================================================================
+
+Resumen del cambio.
+   Configurar un push mirror saliente desde Forgejo hacia Bitbucket en
+   un repositorio especifico, de forma que cada commit que se pushee a
+   Forgejo se replique automaticamente al repositorio equivalente en
+   Bitbucket. Es el sentido contrario al pull mirror actual.
+
+Por que tendria sentido hacerlo.
+   El caso tipico no es trabajar permanentemente con dos remotos vivos.
+   El caso tipico es una fase de transicion al reves: cuando el equipo
+   ya hizo el switchover y Forgejo paso a ser la fuente de verdad,
+   pero por una temporada se quiere mantener Bitbucket actualizado
+   automaticamente como respaldo o como espejo publico para terceros
+   que todavia conozcan la URL antigua. Tambien es util si por alguna
+   razon politica o regulatoria la empresa necesita conservar una
+   replica visible en Bitbucket durante un periodo de gracia.
+
+   No tiene sentido configurarlo durante la fase de pull mirror actual,
+   porque Forgejo todavia esta en modo lectura del repositorio mirror y
+   no se aceptan pushes sobre el. Es una accion para despues del corte.
+
+Restriccion critica - imposibilidad de mirror bidireccional.
+   Forgejo no permite, ni deberia permitir, que un mismo repositorio
+   sea simultaneamente pull mirror desde un origen y push mirror hacia
+   ese mismo origen. La razon es operativa: provocaria un bucle de
+   sincronizacion donde cada cambio de un lado se replicaria al otro y
+   regresaria modificado, con conflictos garantizados de identidad de
+   commits. Por eso, antes de configurar un push mirror hacia
+   Bitbucket, el repositorio en Forgejo tiene que estar en modo
+   regular, no en modo mirror. La conversion se hace desde el propio
+   repositorio en Settings, en la seccion Mirror Settings, opcion
+   "Convert to regular repository". Es un paso unidireccional: no se
+   puede volver a poner como pull mirror despues sin recrear el repo.
+
+Riesgo sobre los datos.
+   Bajo, pero conviene entenderlo. El push mirror sobrescribe el estado
+   del repositorio en Bitbucket con el de Forgejo. Si por alguna razon
+   en Bitbucket alguien hubiera empujado commits despues del switchover
+   (lo cual no deberia ocurrir si el corte se hizo bien con
+   protecciones de rama), esos commits se perderian al primer sync. La
+   mitigacion es hacer Bitbucket read-only en el momento del corte
+   (procedimiento que se explica como parte del plan de migracion en
+   PLAN.txt) y conservar un backup completo de Bitbucket antes de
+   activar el push mirror.
+
+Riesgo operativo.
+   Cero downtime. La configuracion del push mirror se hace en caliente
+   desde la interfaz web sin tocar el contenedor. Lo unico que se
+   genera es trafico saliente periodico hacia Bitbucket, que se ajusta
+   con el intervalo de sincronizacion.
+
+Prerequisitos.
+   El repositorio en Forgejo ya no esta en modo pull mirror; es un
+   repositorio regular. El operador tiene un App Password de Bitbucket
+   con permisos de escritura (scope  write:repository:bitbucket ) sobre
+   el workspace donde vive el repo destino. El repo destino en
+   Bitbucket existe con el mismo historial (de no existir, se crea
+   primero vacio y el primer push lo poblara).
+
+Procedimiento paso a paso.
+
+   Paso 1. Confirmar que el repositorio en Forgejo no esta en modo
+           mirror. Entrar al repo en
+           https://gitserver.clevercloud.app/CleverCloud/<repo> ,
+           pulsar Settings, ir a la pestana Mirror Settings.
+
+           Si la pagina muestra una seccion "Pull Mirror" con un
+           interval activo, primero hay que detener ese pull mirror.
+           La opcion para hacerlo es "Convert to regular repository"
+           o eliminar la configuracion de mirror desde la misma
+           pagina, segun la version exacta de la interfaz. Tras la
+           conversion, refrescar la pagina y verificar que ya no
+           aparece el bloque de pull mirror.
+
+   Paso 2. En la misma pagina Mirror Settings, localizar el bloque
+           "Push Mirror" y pulsar el boton "Add Push Mirror".
+
+   Paso 3. Llenar el formulario con los datos de destino.
+
+               Git Remote Repository URL.  La URL HTTPS del repo en
+                                            Bitbucket, por ejemplo
+                                            https://bitbucket.org/
+                                            <workspace>/<repo>.git
+               Authorization (Username).    x-bitbucket-api-token-auth
+               Authorization (Password).    el App Password de
+                                            Bitbucket con permisos
+                                            de escritura
+               Sync Interval.               valor recomendado 8h o
+                                            24h para fase de respaldo;
+                                            valores menores generan
+                                            mas trafico sin beneficio
+                                            real
+               Sync on Commit.              marcado solo si se quiere
+                                            replicacion casi en tiempo
+                                            real; consume mas recursos
+
+   Paso 4. Pulsar el boton "Add Push Mirror" al final del formulario.
+           Forgejo crea la configuracion y dispara una primera
+           sincronizacion inmediata para validar las credenciales.
+
+   Paso 5. Esperar uno a dos minutos y refrescar la pagina. En el
+           bloque de Push Mirror debe aparecer el destino con un
+           campo "Last update" que muestra una fecha reciente. Si
+           apareciera vacio o con un mensaje de error, significa que
+           las credenciales del App Password no funcionaron o que la
+           URL de destino no acepta el push.
+
+Validacion del resultado.
+   Hacer un commit pequeno en el repositorio Forgejo (por ejemplo
+   tocar el README), pushearlo, esperar el intervalo configurado o
+   forzar un sync manual desde la misma pagina con el boton "Sync
+   now" del bloque Push Mirror, y despues verificar en Bitbucket que
+   el commit aparece. Si aparece, el flujo esta operativo.
+
+Notas operativas.
+   El push mirror replica branches y tags. No replica issues, pull
+   requests, releases ni wiki, porque esos son metadatos especificos
+   de Forgejo. En la practica, esto significa que despues del
+   switchover el equipo trabaja issues y PRs unicamente en Forgejo,
+   y Bitbucket queda solo como espejo del codigo.
+
+   El App Password debe rotarse cada cierto tiempo segun la politica
+   de la empresa. Cuando se rote, hay que actualizar la contrasena en
+   el formulario del push mirror; no es necesario eliminarlo y volver
+   a crearlo.
+
+Reversion.
+   Desde la misma pagina Mirror Settings, en el bloque Push Mirror,
+   hay un boton para eliminar la configuracion. La eliminacion no
+   afecta ni a Forgejo ni a Bitbucket: detiene la replicacion y
+   ambos repositorios quedan en su estado actual. Si despues se
+   quisiera reactivar, se vuelve a configurar siguiendo este
+   procedimiento.
+
+
+==============================================================================
+                       RESUMEN COMPARATIVO DE RIESGOS
+==============================================================================
+
+Las tres acciones de este documento se pueden ejecutar con tranquilidad,
+en cualquier orden, y sin necesidad de respaldo previo, siempre que se
+sigan los pasos como estan escritos. El riesgo de perdida de datos es
+nulo en las tres porque ninguna toca los volumenes de Postgres ni los
+archivos de  forgejo_data  en disco.
+
+El unico inconveniente compartido es un downtime de diez a veinte
+segundos durante el recreate del contenedor server, que aplica solo a
+las acciones 1 y 2. La accion 3 no implica recreate del contenedor; es
+operacion de aplicacion sobre el sistema ya en marcha.
+
+Para minimizar las interrupciones a los usuarios, conviene aplicar las
+acciones 1 y 2 en una sola sesion: editar primero el .env y el
+docker-compose.prod.yml con todos los cambios pendientes, validar con
+docker compose ... config , y recrear el contenedor server una sola
+vez. Asi se incurre en un solo downtime corto en lugar de dos
+consecutivos.
+
+==============================================================================
+                            FIN DEL DOCUMENTO
+==============================================================================
