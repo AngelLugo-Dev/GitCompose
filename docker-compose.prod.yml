@@ -1,0 +1,114 @@
+networks:
+  forgejo_net:
+    driver: bridge
+
+services:
+  caddy:
+    image: caddy:2
+    container_name: clevercloud-caddy
+    restart: unless-stopped
+    networks:
+      - forgejo_net
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/data:/data
+      - ./infra/caddy/config:/config
+    depends_on:
+      - server
+
+  server:
+    image: codeberg.org/forgejo/forgejo:15
+    container_name: clevercloud-forgejo
+    restart: unless-stopped
+    networks:
+      - forgejo_net
+    env_file:
+      - .env
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+
+      # Base de datos
+      - FORGEJO__database__DB_TYPE=postgres
+      - FORGEJO__database__HOST=db:5432
+      - FORGEJO__database__NAME=${POSTGRES_DB}
+      - FORGEJO__database__USER=${POSTGRES_USER}
+      - FORGEJO__database__PASSWD=${POSTGRES_PASSWORD}
+
+      # Dominio publico (clave para links de correos e integraciones)
+      - FORGEJO__server__DOMAIN=${FORGEJO_DOMAIN}
+      - FORGEJO__server__ROOT_URL=https://${FORGEJO_DOMAIN}/
+      - FORGEJO__server__SSH_DOMAIN=${FORGEJO_DOMAIN}
+
+      - FORGEJO__server__SSH_PORT=${FORGEJO_SSH_PORT}
+
+      - FORGEJO__server__OFFLINE_MODE=false
+
+      # LFS (archivos grandes en repos)
+      - FORGEJO__server__LFS_START_SERVER=true
+      - FORGEJO__lfs__STORAGE_TYPE=local
+      - FORGEJO__lfs__JWT_SECRET=${FORGEJO_LFS_JWT_SECRET}
+
+      # Migraciones desde Bitbucket
+      - FORGEJO__repository__DISABLE_MIGRATIONS=false
+      - FORGEJO__migrations__ALLOWED_DOMAINS=bitbucket.org,api.bitbucket.org
+      - FORGEJO__git.timeout__MIGRATE=${FORGEJO_GIT_MIGRATE_TIMEOUT}
+
+      # Registro: cerrado al publico. Solo entran usuarios invitados por email.
+      - FORGEJO__service__DISABLE_REGISTRATION=true
+      - FORGEJO__service__SHOW_REGISTRATION_BUTTON=false
+      - FORGEJO__service__REGISTER_EMAIL_CONFIRM=true
+      - FORGEJO__service__ENABLE_NOTIFY_MAIL=true
+      - FORGEJO__service__REQUIRE_SIGNIN_VIEW=true
+
+      # SMTP (notificaciones, recuperaciones, alerts)
+      - FORGEJO__mailer__ENABLED=true
+      - FORGEJO__mailer__PROTOCOL=smtp
+      - FORGEJO__mailer__SMTP_ADDR=${SMTP_HOST}
+      - FORGEJO__mailer__SMTP_PORT=${SMTP_PORT}
+      - FORGEJO__mailer__USER=${SMTP_USER}
+      - FORGEJO__mailer__PASSWD=${SMTP_PASS}
+      - FORGEJO__mailer__FROM=${SMTP_FROM}
+
+      # Seguridad
+      - FORGEJO__session__COOKIE_SECURE=true
+      - FORGEJO__security__INSTALL_LOCK=true
+      - FORGEJO__security__SECRET_KEY=${FORGEJO_SECRET_KEY}
+      - FORGEJO__security__INTERNAL_TOKEN=${FORGEJO_INTERNAL_TOKEN}
+    volumes:
+      - ./forgejo_data:/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${FORGEJO_SSH_PORT}:22"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  db:
+    image: postgres:15-alpine
+    container_name: clevercloud-forgejo-db
+    restart: unless-stopped
+    networks:
+      - forgejo_net
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

@@ -1,0 +1,225 @@
+==============================================================================
+                          CONTEXTO DE NEGOCIOS
+              Proyecto: Migracion de Bitbucket a Forgejo
+                          Clever Cloud
+==============================================================================
+
+Este documento explica el "por que" del proyecto. Esta dirigido a
+cualquier miembro de la empresa que quiera entender la motivacion,
+los objetivos, los costos y los stakeholders detras de la migracion
+de nuestro servidor Git interno. No incluye procedimientos tecnicos.
+
+
+==============================================================================
+1. QUE ES CLEVER CLOUD
+==============================================================================
+
+Clever Cloud es una empresa que opera servicios de infraestructura y
+plataformas internas para sus clientes. El equipo de desarrollo
+mantiene multiples repositorios de codigo que dan soporte a:
+
+   - Aplicaciones internas para operaciones.
+   - Servicios expuestos a clientes externos.
+   - Herramientas de automatizacion y scripts de infraestructura.
+   - Documentacion tecnica versionada.
+
+Hasta este proyecto, todo el codigo vivia en Bitbucket Cloud bajo
+un workspace pagado externo a la empresa.
+
+
+==============================================================================
+2. POR QUE MIGRAR DE BITBUCKET A UN GIT INTERNO
+==============================================================================
+
+La decision de migrar nace de cuatro razones de negocio que se
+acumularon en los ultimos meses.
+
+   Razon 1 - Consolidacion de infraestructura interna.
+      La filosofia actual de la empresa es operar la mayor cantidad
+      posible de servicios criticos sobre infraestructura propia. El
+      codigo fuente es el activo mas importante de un equipo de
+      software, y depender de un proveedor externo para alojarlo deja
+      una dependencia que no se controla. Migrar a un servidor Git
+      propio (Forgejo, software libre) elimina esa dependencia.
+
+   Razon 2 - Control de costos.
+      Bitbucket cobra por usuario activo al mes. A medida que el
+      equipo crece, el costo escala linealmente. Un servidor Forgejo
+      autoalojado en DigitalOcean tiene un costo fijo (droplet +
+      backups) que no depende del numero de usuarios. A partir de
+      cierto tamano del equipo, el ahorro mensual es significativo.
+
+   Razon 3 - Soberania de datos.
+      Bitbucket aloja el codigo en infraestructura de Atlassian, fuera
+      del control de Clever Cloud. Forgejo autoalojado mantiene el
+      codigo, los backups y los logs dentro de la cuenta de
+      DigitalOcean de la empresa, bajo politicas propias de retencion
+      y acceso.
+
+   Razon 4 - Personalizacion y flexibilidad.
+      Forgejo (fork de Gitea) permite ajustar la interfaz, los
+      permisos, los webhooks y las integraciones a las necesidades
+      especificas de Clever Cloud. Bitbucket no permite esa
+      personalizacion. Tener Git propio abre la puerta a integraciones
+      futuras (CI/CD interno, dashboards, automatizaciones) sin
+      negociar con un vendor.
+
+
+==============================================================================
+3. OBJETIVOS DEL PROYECTO
+==============================================================================
+
+   Objetivo principal.
+      Mover el 100% de los repositorios activos de Bitbucket a un
+      servidor Forgejo propio sin perdida de informacion, sin
+      interrupcion percibida por el equipo, y con documentacion
+      suficiente para que cualquier miembro pueda operar sus
+      repositorios desde el nuevo sistema.
+
+   Objetivos secundarios.
+
+      - Capacitar al equipo en el uso de Forgejo con sesiones
+        en vivo, documentacion clara y embajadores por area.
+      - Establecer un proceso de backup automatizado nocturno con
+        retencion configurable.
+      - Configurar autenticacion en dos pasos (2FA) como politica
+        recomendada para todos los usuarios.
+      - Habilitar SSO o LDAP en una fase futura si el equipo lo
+        requiere (fuera del alcance del proyecto inicial).
+
+   Que NO esta en el alcance.
+
+      - Migrar pipelines de CI a una solucion interna. Por ahora se
+        siguen usando los servicios actuales de CI, solo se actualiza
+        la URL del repositorio origen.
+      - Reescribir documentacion historica de issues o PRs cerrados
+        en Bitbucket. Esa informacion queda archivada en lectura
+        durante el periodo de gracia y luego en el backup final.
+      - Migrar los pipelines de despliegue a una herramienta nueva.
+
+
+==============================================================================
+4. STAKEHOLDERS Y ROLES
+==============================================================================
+
+   Patrocinador del proyecto.
+      El ingeniero en jefe. Autoriza fases, valida el plan,
+      negocia ventanas de mantenimiento con el resto de la
+      organizacion y firma el cierre de cada fase.
+
+   Responsable tecnico (operador de Forgejo).
+      Angel, del equipo de DevOps/infra. Ejecuta la migracion de
+      repos, crea cuentas, configura backups, mantiene la
+      documentacion y atiende soporte tecnico durante la transicion.
+      Punto de contacto principal: claudepro@clevercloud.mx.
+
+   Embajadores por equipo.
+      Una persona por cada area afectada (frontend, backend, QA,
+      DevOps externo). Sirven de puente entre el responsable tecnico
+      y los usuarios de su area. Prueban primero, reportan
+      problemas y ayudan a sus companeros con la configuracion.
+
+   Equipo entero.
+      Todos los desarrolladores y residentes que usan Bitbucket
+      hoy. Reciben documentacion, capacitacion e invitaciones para
+      activar su cuenta en Forgejo. Su responsabilidad es completar
+      su setup cuando se les indique y reportar problemas a su
+      embajador.
+
+   Area financiera.
+      Recibe el aviso final cuando se cancela la suscripcion de
+      Bitbucket, al cierre del periodo de gracia.
+
+
+==============================================================================
+5. COSTO ESTIMADO DEL PROYECTO
+==============================================================================
+
+   Inversion inicial (una sola vez).
+      - Tiempo de DevOps para despliegue: completado.
+      - Tiempo de DevOps para capacitacion y migracion: estimado
+        en 4 a 6 semanas a tiempo parcial.
+      - Sesiones de demo y onboarding del equipo: 1 a 2 sesiones
+        de una hora.
+
+   Costo operativo mensual (recurrente).
+      - Droplet de DigitalOcean (basico, ajustable segun trafico).
+      - Backups automaticos de DigitalOcean.
+      - Dominio propio (gitserver.clevercloud.app, ya existe).
+      - SMTP transaccional (puede ser un servicio externo o cuenta
+        Gmail/Workspace con App Password).
+
+   Ahorro mensual frente al status quo.
+      - Eliminacion del costo por usuario de Bitbucket Cloud.
+      - El break-even depende del numero de usuarios; con un equipo
+        de 10+ usuarios, el ahorro neto es positivo desde el primer
+        mes despues del corte definitivo.
+
+
+==============================================================================
+6. RIESGOS DE NEGOCIO
+==============================================================================
+
+   Riesgo - Resistencia del equipo al cambio.
+      Impacto - bajo a medio. Mitigado con capacitacion, embajadores
+      por area y documentacion en lenguaje sencillo.
+
+   Riesgo - Perdida temporal de productividad durante la transicion.
+      Impacto - bajo. Se mitiga con periodo de uso paralelo
+      (Bitbucket y Forgejo activos al mismo tiempo) antes del corte.
+
+   Riesgo - Caida del servidor Forgejo despues del switchover.
+      Impacto - alto si no hay backup. Mitigado con backups nocturnos
+      automaticos, monitoreo basico del droplet y procedimientos de
+      restore documentados.
+
+   Riesgo - Costo operativo mayor al estimado.
+      Impacto - bajo. El droplet se puede escalar o reducir segun
+      uso real. No hay compromiso de gasto fijo a largo plazo.
+
+   Riesgo - Bloqueo regulatorio o de cumplimiento.
+      Impacto - bajo. Forgejo es software libre con licencia
+      compatible, no introduce dependencias prohibidas. El alojamiento
+      en DigitalOcean cumple las mismas politicas que el resto de la
+      infraestructura interna.
+
+
+==============================================================================
+7. INDICADORES DE EXITO
+==============================================================================
+
+El proyecto se considera exitoso cuando se cumplen los cuatro
+indicadores siguientes despues del switchover definitivo:
+
+   1. El 100% de los repositorios activos esta en Forgejo y ha
+      tenido al menos un commit o un PR en los ultimos 30 dias.
+
+   2. El 100% del equipo activo ha entrado a Forgejo al menos una
+      vez, completado el cambio de contrasena y configurado su
+      credencial (PAT o llave SSH).
+
+   3. No hay tickets de soporte abiertos relacionados con la
+      migracion despues de 30 dias del switchover.
+
+   4. La suscripcion de Bitbucket se cancela en tiempo y forma,
+      con backup completo del workspace almacenado.
+
+
+==============================================================================
+8. CALENDARIO ALTO NIVEL
+==============================================================================
+
+   Fase 0 - Preparacion tecnica (parcialmente completada).
+   Fase 1 - Anuncio y onboarding (1 semana).
+   Fase 2 - Migracion piloto con repo de baja criticidad (3-5 dias).
+   Fase 3 - Migracion progresiva por olas (2-4 semanas).
+   Fase 4 - Switchover definitivo (2 dias).
+   Fase 5 - Periodo de gracia y sunset de Bitbucket (30+1 dias).
+
+Las fechas concretas dependen del calendario de releases de la
+empresa y se confirman con el ingeniero en jefe.
+
+
+==============================================================================
+                          FIN DEL DOCUMENTO
+==============================================================================

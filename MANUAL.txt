@@ -1,0 +1,1003 @@
+            MANUAL DE DESPLIEGUE Y USO DE FORGEJO - CLEVER CLOUD
+
+Este manual describe el despliegue del servidor Git interno de Clever Cloud
+sobre Forgejo (originalmente desplegado en v9 y actualizado a v15 el 19 de
+mayo de 2026), alojado en un droplet de DigitalOcean con Ubuntu 24.04, y
+documenta el procedimiento que cada usuario final sigue para integrarse al
+sistema una vez invitado.
+
+El servidor responde en  https://gitserver.clevercloud.app  y opera con tres
+contenedores administrados por Docker Compose: Caddy como reverse proxy con
+TLS automatico de Let's Encrypt, Forgejo 15 como motor de Git (capitulo 11
+documenta la actualizacion desde la version 9 inicial) y Postgres 15 como
+base de datos. Todo el stack productivo vive en  /opt/forgejo  dentro del
+droplet.
+
+El manual se divide en dos partes. La Parte I documenta el procedimiento de
+despliegue tal como quedo aplicado, organizado por capitulos tematicos. La
+Parte II contiene la guia que cada empleado o residente recibe al ser
+invitado al sistema.
+
+
+
+                         PARTE I - DESPLIEGUE REALIZADO
+
+
+
+------------------------------------------------------------------------------
+Capitulo 1. Verificacion de prerequisitos
+------------------------------------------------------------------------------
+
+Proposito.
+   Confirmar antes de cualquier accion destructiva que el operador esta
+   conectado al droplet correcto y que el dominio publico ya resuelve a la
+   IP del droplet. Sin esta verificacion previa, una equivocacion de host
+   podria modificar un servidor distinto, y un DNS mal apuntado romperia
+   la emision del certificado TLS al final del proceso.
+
+Procedimiento.
+   El operador entra por SSH al droplet con su usuario  angel  y ejecuta
+   un primer comando que reune toda la informacion de identificacion del
+   sistema en un solo bloque:
+
+       whoami && hostname && lsb_release -a && \
+         ip -4 addr show | grep inet | grep -v 127.0.0.1
+
+   La salida debe mostrar al usuario  ----  conectado al host  gitserver
+   con  Ubuntu 24.04.3 LTS  y la IP publica del droplet, que en este caso
+   es  64.23.137.164 . A continuacion se valida la resolucion del dominio
+   con
+
+       dig +short gitserver.clevercloud.app
+
+   El comando debe devolver exactamente la misma IP del droplet. Si
+   devolviera otra cosa, no se debe avanzar al Capitulo 2 hasta que el
+   registro DNS este corregido y propagado.
+
+Reversion.
+   Estos comandos son de solo lectura. No modifican configuracion ni
+   archivos del sistema, por lo que no requieren rollback.
+
+
+------------------------------------------------------------------------------
+Capitulo 2. Sistema operativo y firewall del droplet
+------------------------------------------------------------------------------
+
+Proposito.
+   Aplicar parches de seguridad pendientes y endurecer el droplet antes
+   de exponer cualquier servicio publico, configurando UFW para que solo
+   acepte trafico en los puertos estrictamente necesarios.
+
+Procedimiento - actualizacion del sistema.
+   Se descargan e instalan los paquetes pendientes con
+
+       sudo apt update && sudo apt upgrade -y
+
+   Esta operacion puede incluir una actualizacion de kernel. En ese caso
+   el droplet anuncia "System restart required" en el MOTD. El reinicio
+   no es bloqueante para el despliegue, ya que el kernel anterior continua
+   en uso hasta el proximo reboot, pero queda como tarea para una ventana
+   de mantenimiento futura. Cuando se haga, los contenedores arrancan
+   solos al volver porque tienen la directiva  restart: unless-stopped .
+
+Procedimiento - configuracion del firewall.
+   Se activa UFW con politica por defecto de bloqueo total entrante y
+   permiso total saliente, y solo despues se abren los cuatro puertos
+   necesarios para el despliegue:
+
+       sudo ufw default deny incoming
+       sudo ufw default allow outgoing
+       sudo ufw allow OpenSSH
+       sudo ufw allow 80/tcp
+       sudo ufw allow 443/tcp
+       sudo ufw allow 222/tcp
+       sudo ufw --force enable
+       sudo ufw status verbose
+
+   El orden no es opcional. La regla OpenSSH se introduce antes de
+   activar UFW para evitar que el operador quede bloqueado del droplet
+   al cerrar la sesion en curso. El puerto 80 es indispensable para que
+   Caddy resuelva el desafio HTTP-01 de Let's Encrypt durante la emision
+   del certificado. El 443 sirve el trafico HTTPS publico de Forgejo. El
+   222 expone el servicio SSH propio de Forgejo para  git clone  y
+   git push , separado del 22 que queda reservado para administracion.
+
+Reversion.
+   Para desactivar el firewall completo se ejecuta
+
+       sudo ufw disable
+
+   Una regla individual se elimina con
+
+       sudo ufw delete allow PUERTO/tcp
+
+   Advertencia critica. No se debe ejecutar  ufw disable  seguido de
+   ufw enable  sin antes haber confirmado que la regla OpenSSH sigue
+   presente. En el momento de la reactivacion sin esa regla, la sesion
+   SSH del operador se interrumpe y el droplet queda inaccesible hasta
+   acceder por la consola web del panel de DigitalOcean.
+
+
+------------------------------------------------------------------------------
+Capitulo 3. Instalacion de Docker y Compose
+------------------------------------------------------------------------------
+
+Proposito.
+   Disponer del runtime de contenedores que ejecutara el stack completo
+   de Forgejo. Se utiliza la version provista por el script oficial de
+   Docker Inc. para garantizar consistencia con la documentacion publica
+   y simplificar las actualizaciones futuras.
+
+Procedimiento.
+
+       curl -fsSL https://get.docker.com | sh
+       sudo usermod -aG docker $USER
+       newgrp docker
+       docker --version
+       docker compose version
+       docker run --rm hello-world
+
+   La primera linea descarga e instala Docker Engine y el plugin Compose
+   v2 desde el dominio oficial  get.docker.com . La segunda agrega al
+   usuario  angel  al grupo  docker  para que pueda invocar la CLI sin
+   sudo. La tercera aplica la nueva pertenencia de grupo a la sesion en
+   curso sin necesidad de cerrar y reabrir SSH. Las dos siguientes
+   imprimen las versiones instaladas. La ultima descarga y ejecuta el
+   contenedor  hello-world , confirmando simultaneamente que el daemon
+   esta operativo y que el droplet tiene acceso a Docker Hub.
+
+Versiones instaladas en este despliegue.
+   Docker Engine 29.4.2 con Compose v5.1.3.
+
+Reversion.
+   Para retirar al usuario del grupo docker
+
+       sudo deluser $USER docker
+
+   Para desinstalar Docker por completo, eliminando imagenes y datos:
+
+       sudo apt purge -y docker-ce docker-ce-cli containerd.io \
+         docker-buildx-plugin docker-compose-plugin
+       sudo rm -rf /var/lib/docker /etc/docker
+
+
+------------------------------------------------------------------------------
+Capitulo 4. Estructura de archivos del stack
+------------------------------------------------------------------------------
+
+Proposito.
+   Establecer la convencion de ubicacion de los stacks productivos en
+   /opt/<servicio> , independiente del home del operador, para que los
+   datos sobrevivan a una eventual eliminacion de la cuenta de usuario y
+   para que cualquier operador futuro encuentre el sistema en la ruta
+   esperada.
+
+Procedimiento - creacion de la carpeta raiz.
+
+       sudo mkdir -p /opt/forgejo
+       sudo chown -R $USER:$USER /opt/forgejo
+       cd /opt/forgejo
+
+   El operador queda como propietario de la carpeta para poder editar los
+   archivos del stack sin necesidad de sudo en cada operacion.
+
+Procedimiento - archivos del stack.
+   Se crean dos archivos directamente en el droplet con  nano , evitando
+   la transferencia desde la PC del operador:
+
+       nano docker-compose.prod.yml
+       mkdir -p /opt/forgejo/infra/caddy
+       nano /opt/forgejo/infra/caddy/Caddyfile
+
+   El primero define los tres servicios y sus configuraciones. El segundo
+   contiene la configuracion del reverse proxy con el dominio publico,
+   las cabeceras de seguridad y el destino interno hacia el contenedor
+   server  en el puerto 3000. El contenido se guarda con
+   Ctrl+O Enter Ctrl+X.
+
+Validacion del YAML.
+   Se valida la sintaxis con
+
+       docker compose -f docker-compose.prod.yml config >/dev/null
+
+   En esta etapa el comando termina con codigo de salida 1 y un mensaje
+   "env file /opt/forgejo/.env not found". Eso es comportamiento esperado:
+   el archivo .env se crea en el Capitulo 5. La validacion definitiva del
+   YAML ocurre al final de ese capitulo.
+
+Reversion.
+   Mientras el stack no haya sido levantado por primera vez (Capitulo 6),
+   la carpeta entera puede destruirse sin perdida de datos:
+
+       sudo rm -rf /opt/forgejo
+
+   Una vez ejecutado el Capitulo 6, esa misma orden destruye los datos
+   de Postgres y de Forgejo, por lo que ya no debe usarse sin backup.
+
+
+------------------------------------------------------------------------------
+Capitulo 5. Secretos y archivo .env
+------------------------------------------------------------------------------
+
+Proposito.
+   Centralizar todos los secretos del sistema (credenciales de Postgres,
+   claves criptograficas internas de Forgejo, credenciales SMTP, dominio
+   publico) en un unico archivo legible solo por el operador, que Docker
+   Compose carga automaticamente y propaga a los contenedores como
+   variables de entorno.
+
+Politica.
+   El archivo .env nunca se sube a git, nunca se comparte por canales de
+   mensajeria y solo el usuario operador puede leerlo. La fuente de
+   verdad es el propio archivo en el droplet; conviene mantener una copia
+   adicional en un gestor de contrasenas corporativo y un respaldo
+   cifrado dentro del backup nocturno.
+
+Procedimiento - generacion de secretos aleatorios.
+   Las tres claves internas de Forgejo se generan en hexadecimal de 256
+   bits, y la contrasena de Postgres se reduce a 32 caracteres
+   alfanumericos para evitar caracteres especiales que podrian romper la
+   cadena de conexion:
+
+       SECRET_KEY=$(openssl rand -hex 32)
+       INTERNAL_TOKEN=$(openssl rand -hex 32)
+       LFS_JWT=$(openssl rand -hex 32)
+       PG_PASS=$(openssl rand -base64 36 | tr -d '=+/' | head -c 32)
+
+Procedimiento - escritura del archivo .env.
+   La escritura se hace linea por linea con  echo  para evitar problemas
+   con bracketed paste de terminales Windows que rompen heredocs:
+
+       > .env
+       echo "FORGEJO_DOMAIN=gitserver.clevercloud.app" >> .env
+       echo "FORGEJO_SSH_PORT=222" >> .env
+       echo "FORGEJO_GIT_MIGRATE_TIMEOUT=7200" >> .env
+       echo "POSTGRES_USER=forgejo_admin" >> .env
+       echo "POSTGRES_PASSWORD=$PG_PASS" >> .env
+       echo "POSTGRES_DB=forgejo" >> .env
+       echo "SMTP_HOST=smtp.gmail.com" >> .env
+       echo "SMTP_PORT=587" >> .env
+       echo "SMTP_USER=" >> .env
+       echo "SMTP_PASS=" >> .env
+       echo "SMTP_FROM=" >> .env
+       echo "FORGEJO_SECRET_KEY=$SECRET_KEY" >> .env
+       echo "FORGEJO_INTERNAL_TOKEN=$INTERNAL_TOKEN" >> .env
+       echo "FORGEJO_LFS_JWT_SECRET=$LFS_JWT" >> .env
+       chmod 600 .env
+       unset SECRET_KEY INTERNAL_TOKEN LFS_JWT PG_PASS
+
+   El redireccionamiento  > .env  inicial vacia o crea el archivo desde
+   cero. Cada  echo ... >> .env  agrega una linea con la variable ya
+   expandida por el shell. El  chmod 600  restringe la lectura al
+   propietario.  unset  borra los secretos de la memoria del shell para
+   que no queden expuestos en el historial ni en el output de  set .
+
+Decision sobre SMTP.
+   Las variables  SMTP_USER ,  SMTP_PASS  y  SMTP_FROM  se dejan vacias
+   en este momento. Forgejo arranca correctamente con esos campos en
+   blanco; solo el envio de correo queda inactivo. Cuando el ingeniero
+   en jefe entrega el correo corporativo y el App Password de Google
+   Workspace correspondiente, las tres variables se completan en una
+   edicion posterior y se recrea unicamente el contenedor server con
+   docker compose ... up -d --force-recreate server  para aplicar los
+   cambios, sin tocar la base de datos ni el reverse proxy.
+
+Validacion final.
+   Una vez creado .env, se vuelve a ejecutar la validacion del YAML:
+
+       docker compose -f docker-compose.prod.yml config >/dev/null
+
+   Esta vez debe terminar con codigo de salida 0 y sin advertencias.
+
+Reversion.
+   Mientras el stack no se haya levantado por primera vez:
+
+       rm -f /opt/forgejo/.env
+
+   y volver a ejecutar este capitulo genera secretos completamente
+   nuevos. Una vez levantado el stack, eliminar el .env rompe el sistema
+   porque Postgres ya quedo inicializado con la contrasena original.
+
+
+------------------------------------------------------------------------------
+Capitulo 6. Arranque del stack
+------------------------------------------------------------------------------
+
+Proposito.
+   Iniciar los tres contenedores en el orden correcto, esperar a que
+   Forgejo aplique sus migraciones internas y a que Caddy negocie el
+   certificado TLS con Let's Encrypt, y validar finalmente que el sitio
+   responde por HTTPS desde internet.
+
+Procedimiento - descarga y arranque.
+
+       cd /opt/forgejo
+       docker compose -f docker-compose.prod.yml pull
+       docker compose -f docker-compose.prod.yml up -d
+
+   El primer comando descarga las tres imagenes ( caddy:2 , la imagen
+   oficial de Forgejo 9 publicada en codeberg.org y postgres:15-alpine ).
+   El segundo crea la red interna  forgejo_forgejo_net , inicializa los
+   contenedores en orden de dependencias y devuelve el control al
+   operador con la opcion  -d  (detached).
+
+Procedimiento - verificacion del estado.
+   Tras esperar aproximadamente un minuto a que se completen las
+   migraciones de Forgejo y la negociacion TLS, se consulta el estado:
+
+       docker compose -f docker-compose.prod.yml ps
+
+   Los tres contenedores deben aparecer en estado  Up . El de Caddy
+   publica los puertos 80 y 443 (TCP y UDP, este ultimo para HTTP/3).
+   Forgejo expone internamente el 3000 y publica externamente el 222
+   para Git SSH. Postgres expone solo el 5432 dentro de la red de Docker,
+   sin publicarlo al host, lo cual es la postura segura: la base no es
+   alcanzable desde el exterior.
+
+Validacion publica.
+   Desde la PC del operador se realiza una peticion HTTPS al dominio:
+
+       curl -I -m 10 https://gitserver.clevercloud.app
+
+   La respuesta debe ser  HTTP/2 200  con cabeceras que confirman la
+   cadena completa: la cabecera  via: 1.1 Caddy  prueba que el reverse
+   proxy esta enrutando correctamente al backend; las cabeceras
+   strict-transport-security ,  x-content-type-options: nosniff ,
+   x-frame-options: SAMEORIGIN  y  referrer-policy:
+   strict-origin-when-cross-origin  prueban que el Caddyfile esta
+   siendo aplicado; y el hecho de que la negociacion sea HTTP/2 prueba
+   indirectamente que Let's Encrypt emitio el certificado correctamente,
+   ya que HTTP/2 requiere TLS.
+
+Reversion.
+   Para apagar los tres contenedores conservando los datos en disco:
+
+       docker compose -f docker-compose.prod.yml down
+
+   Para destruir tambien los volumenes de datos (operacion irreversible
+   que elimina repositorios, usuarios, issues y la base completa):
+
+       docker compose -f docker-compose.prod.yml down -v
+       sudo rm -rf forgejo_data postgres_data \
+         infra/caddy/data infra/caddy/config
+
+
+------------------------------------------------------------------------------
+Capitulo 7. Cuenta administradora inicial
+------------------------------------------------------------------------------
+
+Proposito.
+   Crear la primera cuenta de administrador del sitio. El despliegue
+   tiene el registro publico desactivado, por lo que la primera cuenta
+   no puede generarse desde la interfaz web y se crea con la herramienta
+   CLI integrada de Forgejo, ejecutada dentro del contenedor.
+
+Procedimiento - creacion via CLI.
+
+       docker compose -f docker-compose.prod.yml exec -u 1000 server \
+         forgejo admin user create \
+           --admin \
+           --username clever-root \
+           --email devops@clevercloud.mx \
+           --random-password \
+           --must-change-password
+
+   El parametro  exec -u 1000 server  ejecuta el comando dentro del
+   contenedor  server  con el UID interno 1000 que Forgejo utiliza. La
+   bandera  --admin  asigna rol de administrador del sitio.
+   --random-password  hace que Forgejo genere una contrasena fuerte y
+   la imprima en pantalla una unica vez.  --must-change-password
+   obliga al usuario a sustituirla en su primer login.
+
+Procedimiento - primer login.
+   El operador copia la contrasena aleatoria al gestor de contrasenas
+   corporativo antes de cerrar la terminal. Despues entra al sitio en
+   https://gitserver.clevercloud.app/user/login  con el usuario
+   clever-root  y la contrasena aleatoria, y Forgejo solicita una
+   contrasena nueva en ese mismo flujo.
+
+Notas operativas.
+   El correo  devops@clevercloud.mx  esta puesto como marcador de
+   posicion mientras se confirma la direccion corporativa definitiva.
+   Cuando llegue, se actualiza desde Site Administration, en Users, en
+   la edicion del usuario y modificando el campo Email; no requiere
+   reinicio del stack.
+
+   La activacion del segundo factor (2FA) sobre  clever-root  esta
+   diferida hasta que el SMTP este operativo. La razon es que el flujo
+   de recuperacion por correo es una via adicional de rescate ante la
+   perdida del dispositivo TOTP, y conviene tener todas las vias
+   disponibles antes de activar 2FA. Los codigos de recuperacion que
+   genera Forgejo al activarlo siguen funcionando independientemente
+   del correo, pero el operador prefirio mantener todas las redes de
+   seguridad listas antes de hacer el cambio.
+
+Reversion.
+
+       docker compose -f docker-compose.prod.yml exec -u 1000 server \
+         forgejo admin user delete --username clever-root
+
+   Mientras la cuenta no haya creado repositorios ni ejecutado
+   operaciones criticas, esta orden la elimina sin dejar rastro y
+   permite recrearla con otros parametros.
+
+
+------------------------------------------------------------------------------
+Capitulo 8. Diagnostico del firewall externo
+------------------------------------------------------------------------------
+
+Proposito.
+   Confirmar que los puertos expuestos por el droplet son alcanzables
+   desde internet, identificando cualquier capa de filtrado adicional
+   por encima de UFW.
+
+Procedimiento.
+   Desde la PC del operador, en PowerShell, se ejecutan pruebas de
+   alcance contra los cuatro puertos publicados, midiendo el tiempo de
+   respuesta de cada conexion:
+
+       Measure-Command { Test-NetConnection 64.23.137.164 -Port 22 }
+       Measure-Command { Test-NetConnection 64.23.137.164 -Port 80 }
+       Measure-Command { Test-NetConnection 64.23.137.164 -Port 443 }
+       Measure-Command { Test-NetConnection 64.23.137.164 -Port 222 }
+
+Interpretacion de los resultados.
+   Una respuesta en menos de un segundo con resultado positivo indica
+   que el firewall externo permite trafico al puerto y que hay servicio
+   escuchando.
+
+   Una respuesta negativa rapida (entre dos y tres segundos) indica que
+   el firewall externo permite trafico, pero no hay servicio escuchando
+   en ese momento. Caso normal de los puertos 80 y 443 antes del
+   Capitulo 6.
+
+   Un timeout largo (alrededor de 21 segundos) indica que algun
+   firewall externo esta descartando los paquetes antes de que lleguen
+   al droplet. Es la firma caracteristica de un Cloud Firewall del
+   panel de DigitalOcean con regla faltante.
+
+Resultado en este despliegue.
+   El puerto 22 respondio en 0.13 segundos. El 80 y el 443 fallaron
+   rapido en aproximadamente 2.5 segundos cada uno (consistente con la
+   ejecucion previa al Capitulo 6). El 222 hizo timeout en 21.1
+   segundos, lo cual confirma la presencia de un Cloud Firewall externo
+   adjunto al droplet  gitserver  con reglas para 22, 80 y 443 pero sin
+   regla para el 222.
+
+Accion pendiente.
+   El ingeniero en jefe debe agregar al Cloud Firewall en el panel de
+   DigitalOcean una regla Inbound TCP 222 desde "All IPv4, All IPv6".
+   Mientras esa regla no exista, las operaciones Git via SSH no
+   funcionan. Las operaciones via HTTPS con Personal Access Tokens si
+   funcionan al cien por ciento. La apertura del puerto no requiere
+   redespliegue: en cuanto la regla se aplica, el SSH queda disponible
+   automaticamente.
+
+
+------------------------------------------------------------------------------
+Capitulo 9. Organizacion CleverCloud y teams
+------------------------------------------------------------------------------
+
+Proposito.
+   Crear la estructura organizacional dentro de Forgejo que centraliza
+   el ownership de todos los repositorios y permite gestionar los
+   permisos de los miembros por grupos en lugar de uno por uno.
+
+Justificacion.
+   Alojar los repositorios en una organizacion (en lugar de cuentas
+   personales) garantiza que la salida de un empleado no deja
+   repositorios huerfanos. Asignar acceso a traves de teams permite
+   modificar los permisos desde un solo lugar al cambiar la membresia,
+   en vez de revisar cada repositorio individualmente.
+
+Procedimiento - creacion de la organizacion.
+   Toda esta configuracion se hace desde la interfaz web. Tras iniciar
+   sesion como  clever-root , se accede al boton de creacion (icono
+   "+" en la esquina superior derecha) y se selecciona "New
+   Organization". Los campos son:
+
+       Owner             clever-root
+       Organization Name CleverCloud
+       Visibility        Private
+
+   Tras confirmar, la organizacion queda accesible en
+   https://gitserver.clevercloud.app/CleverCloud .
+
+Procedimiento - creacion de los teams.
+   Dentro de la pestana Teams de la organizacion se crean los cuatro
+   equipos que reflejan los roles operativos:
+
+       Owners            permission Owner    (control total)
+       Developers        permission Write    (lectura y escritura)
+       QA                permission Read     (lectura, triage)
+       ReleaseManagers   permission Write    (releases y tags)
+
+   Los cuatro teams se configuran con Repository Access en "All
+   repositories", de manera que el permiso aplica automaticamente a
+   cualquier repositorio de la organizacion presente o futuro. La
+   restriccion por repositorio individual queda disponible para casos
+   especiales que se decidan despues.
+
+Procedimiento - politica por defecto.
+   En la pestana Settings de la organizacion se confirma que el campo
+   "Default repository permission" tenga el valor "None". Con esa
+   configuracion, un repositorio recien creado no es accesible
+   automaticamente para todos los miembros de la organizacion: el
+   acceso se concede unicamente por pertenencia a un team. Esta es la
+   postura segura por defecto.
+
+Reversion.
+   Cada team se elimina desde su propia pestana Settings, opcion
+   Delete Team. La organizacion completa se elimina desde Organization,
+   en Settings, al final de la pagina, opcion Delete Organization,
+   escribiendo el nombre exacto para confirmar. Esa accion borra
+   tambien todos los repositorios contenidos, por lo que solo es
+   apropiada cuando se decide rehacer la estructura desde cero.
+
+
+------------------------------------------------------------------------------
+Capitulo 10. Migracion del primer repositorio desde Bitbucket
+------------------------------------------------------------------------------
+
+Proposito.
+   Migrar el repositorio de mayor importancia del workspace de
+   Bitbucket (el sitio publico de Clever Cloud, aproximadamente 2.4
+   GB) como prueba de que el flujo de migracion completo funciona y
+   como punto de partida para mover el resto del workspace.
+
+Estrategia.
+   Se utiliza la modalidad de pull mirror, que mantiene a Forgejo
+   sincronizado periodicamente con Bitbucket, en lugar de hacer una
+   copia unica. La razon es que Bitbucket sigue activo en paralelo
+   durante el periodo de transicion mientras los desarrolladores van
+   trasladando su flujo de trabajo. El corte definitivo de Bitbucket
+   se programa cuando todos los repositorios estan migrados.
+
+Procedimiento.
+   Toda la operacion se ejecuta desde la interfaz web de Forgejo, con
+   el usuario  clever-root . El acceso es por el icono "+" en la
+   esquina superior derecha, opcion New Migration, opcion Git. Los
+   campos relevantes son:
+
+       Migration source    URL HTTPS del repositorio en Bitbucket
+       Authorization User  x-bitbucket-api-token-auth
+       Authorization Pass  API token de Bitbucket con scopes
+                           read:repository:bitbucket
+                           read:workspace:bitbucket
+                           read:user:bitbucket
+       Owner               CleverCloud
+       Repo Name           identico al de origen
+
+   Se marca la casilla "This repository will be a mirror" para activar
+   el modo pull mirror. Se marca tambien la opcion LFS para que los
+   blobs binarios pesados (imagenes, videos y fuentes del sitio)
+   viajen completos y no como punteros vacios.
+
+Validacion.
+   Tras finalizar el clone inicial, en la pagina del repositorio
+   migrado se confirma que el Sync Interval esta activo y que el
+   campo Last sync registra una fecha reciente. La descarga de los
+   2.4 GB se completa dentro del timeout configurado en el .env (
+   FORGEJO_GIT_MIGRATE_TIMEOUT=7200 segundos, equivalente a 2 horas).
+
+Advertencia operativa sobre LFS en pull mirror.
+   La sincronizacion automatica del mirror copia commits regulares,
+   pero los blobs LFS nuevos que se pusheen a Bitbucket despues de
+   configurado el mirror pueden no llegar a Forgejo en cada
+   sincronizacion. Por este motivo, durante la fase espejo se
+   comunica al equipo que no se pusheen archivos LFS nuevos a
+   Bitbucket. En el momento del corte, ademas de un Sync now manual
+   final, conviene hacer un re-clone fresco si se sospecha que hubo
+   cambios LFS para evitar perder blobs.
+
+Reversion.
+   Mientras no haya datos criticos generados directamente en Forgejo
+   (issues, PRs, releases nuevos), el repositorio puede eliminarse
+   desde su Settings, opcion Delete Repository, escribiendo el nombre
+   exacto para confirmar. Bitbucket no se ve afectado: los datos
+   originales permanecen intactos en su workspace y la migracion
+   puede repetirse con otras opciones.
+
+
+------------------------------------------------------------------------------
+Capitulo 11. Actualizacion mayor de Forgejo v9 a v15
+------------------------------------------------------------------------------
+
+Proposito.
+   Llevar el motor Forgejo desde la version 9, con la que se hizo el
+   primer despliegue, hasta la version 15, incorporando seis lineas
+   mayores de parches de seguridad, correcciones y migraciones de
+   esquema. La operacion no toca Postgres ni Caddy y no abre puertos
+   nuevos, de modo que la unica disrupcion que perciben los usuarios son
+   los segundos en que el contenedor server se reinicia con la imagen
+   nueva.
+
+Compatibilidad y ruta de upgrade.
+   Forgejo soporta saltar versiones mayores en un solo paso. Las
+   migraciones internas de base de datos se ejecutan automaticamente al
+   arrancar el contenedor con la imagen destino, sin necesidad de pasar
+   por v10, v11, v12, v13 ni v14 de forma intermedia. PostgreSQL
+   15-alpine y Caddy v2 quedan compatibles sin cambios. Todas las
+   variables de entorno del .env existente se mantienen validas.
+
+Procedimiento - backup pre-upgrade.
+   Antes del cambio se respalda el stack completo. El destino esta en
+   el home del operador porque /tmp rechaza escritura con sudo en este
+   droplet, y el archivo queda con propiedad del operador para poder
+   moverlo o descargarlo sin sudo:
+
+       cd /opt/forgejo
+       sudo tar czf /home/angel/forgejo_backup_$(date +%F).tar.gz \
+         ./forgejo_data ./postgres_data ./infra \
+         ./docker-compose.prod.yml ./.env
+       sudo chown angel:angel /home/angel/forgejo_backup_*.tar.gz
+
+   Advertencia critica sobre el respaldo de postgres_data.
+      El comando anterior copia /opt/forgejo/postgres_data mientras el
+      contenedor db sigue corriendo. PostgreSQL escribe WAL en paralelo,
+      por lo que los archivos pueden quedar en estado inconsistente al
+      copiarse en caliente. Si una eventual restauracion se basara solo
+      en ese tar.gz, podria fallar al arrancar. Para upgrades futuros se
+      recomienda complementar con un dump logico antes del tar:
+
+          docker compose -f docker-compose.prod.yml exec -T db \
+            pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" \
+            | sudo tee /home/angel/forgejo_db_$(date +%F).sql >/dev/null
+
+      o, alternativamente, detener el contenedor db unos segundos antes
+      del tar. En el upgrade realizado a v15 la operacion fue exitosa y
+      no se requirio restauracion, pero el dump logico se mantiene como
+      practica recomendada de aqui en adelante.
+
+   El operador debe verificar al menos la legibilidad del archivo antes
+   de seguir:
+
+       tar tzf /home/angel/forgejo_backup_*.tar.gz | head
+
+   Se recomienda ademas copiar el backup fuera del droplet (Spaces de
+   DigitalOcean, S3 u otro destino cifrado externo) antes de avanzar al
+   cambio de imagen. Un backup que solo vive en el mismo disco que el
+   servicio no es un backup completo.
+
+Procedimiento - cambio de version de la imagen.
+   En docker-compose.prod.yml se sustituye la etiqueta 9 por 15 en la
+   linea del servicio server, y se valida la sintaxis resultante:
+
+       sudo sed -i 's|codeberg.org/forgejo/forgejo:9|codeberg.org/forgejo/forgejo:15|g' \
+         docker-compose.prod.yml
+       grep "image:.*forgejo" docker-compose.prod.yml
+       docker compose -f docker-compose.prod.yml config >/dev/null
+
+   La segunda linea confirma que la sustitucion se aplico. La tercera
+   debe terminar con codigo 0 y sin advertencias; de lo contrario, no se
+   debe seguir y conviene restaurar el archivo desde el backup antes de
+   continuar.
+
+Procedimiento - pull de la imagen nueva.
+   Se descarga la imagen antes de tocar el contenedor en ejecucion, de
+   modo que el cambio efectivo dure los segundos minimos del reinicio:
+
+       docker pull codeberg.org/forgejo/forgejo:15
+
+Procedimiento - recreacion del contenedor server.
+   Solo se reinicia el servicio server. Caddy y db continuan operando
+   sin interrupcion, lo cual deja la base de datos disponible antes y
+   durante el arranque de la nueva imagen y minimiza el blast radius del
+   cambio:
+
+       docker compose -f docker-compose.prod.yml stop server
+       docker compose -f docker-compose.prod.yml up -d server
+
+   Compose detecta que la imagen del servicio server cambio y recrea el
+   contenedor con la version 15.
+
+Verificacion - migraciones de base de datos.
+   Las migraciones se ejecutan automaticamente al arrancar el contenedor
+   nuevo y se observan en los logs:
+
+       docker logs -f clevercloud-forgejo
+
+   En este upgrade se aplicaron mas de cuarenta migraciones de las ramas
+   v14 y v15, entre otras las relativas a action_runner_token,
+   ephemeral_runner, access_token_resource, mirror_remoteaddressauth,
+   esquemas de notificacion y campos de actions. El log debe terminar
+   con la linea
+
+       ORM engine initialization successful!
+
+   y, tras ella, Forgejo continua hasta exponer el servidor web en
+   http://0.0.0.0:3000 y reportar el health check interno respondiendo
+   200 OK. El indexador bleve de issues detecta que el formato es
+   anterior (version 4), lo elimina y lo reconstruye automaticamente;
+   este rebuild dura menos de un segundo en este volumen de datos.
+
+Validacion publica.
+   Desde la PC del operador se confirma que el sitio sigue respondiendo
+   por HTTPS y que la nueva version queda activa:
+
+       curl -I -m 10 https://gitserver.clevercloud.app
+
+   La respuesta debe seguir siendo HTTP/2 200 con las mismas cabeceras
+   de seguridad descritas en el capitulo 6, y en la interfaz web la
+   version reportada en el pie de pagina pasa de 9.x.x a 15.0.2.
+
+Warnings observados al arrancar v15 (no criticos).
+   Al iniciar el contenedor aparecen dos advertencias relacionadas con
+   el correo, ambas heredadas de la configuracion previa del .env y no
+   introducidas por el upgrade:
+
+       connecting over insecure SMTP protocol to non-local address
+       no mailer.FROM provided
+
+   La primera recomienda configurar TLS explicito en la conexion SMTP.
+   La segunda indica que SMTP_FROM esta vacio. Ambas se resuelven en la
+   edicion futura del .env cuando el ingeniero en jefe entregue las
+   credenciales SMTP corporativas definitivas, segun lo previsto en el
+   capitulo 5. No son introducidas por v15 y no afectan la operacion del
+   resto del sistema.
+
+Reversion.
+   Mientras los datos del volumen forgejo_data sigan siendo compatibles
+   con v9 (caso normal si no se ejecuto ninguna migracion destructiva al
+   arrancar), basta con revertir la etiqueta de la imagen y recrear el
+   contenedor:
+
+       docker compose -f docker-compose.prod.yml stop server
+       sudo sed -i 's|codeberg.org/forgejo/forgejo:15|codeberg.org/forgejo/forgejo:9|g' \
+         docker-compose.prod.yml
+       docker compose -f docker-compose.prod.yml up -d server
+
+   Si la base de datos ya migro su esquema a v15 (caso normal una vez
+   completado el procedimiento), una downgrade simple de la imagen no
+   es suficiente porque v9 no entiende el esquema nuevo. En ese caso es
+   obligatorio restaurar desde backup:
+
+       docker compose -f docker-compose.prod.yml down
+       cd /opt/forgejo
+       sudo rm -rf forgejo_data postgres_data
+       sudo tar xzf /home/angel/forgejo_backup_<fecha>.tar.gz
+       sudo sed -i 's|codeberg.org/forgejo/forgejo:15|codeberg.org/forgejo/forgejo:9|g' \
+         docker-compose.prod.yml
+       docker compose -f docker-compose.prod.yml up -d
+
+   Por esta razon el backup pre-upgrade es la red de seguridad
+   imprescindible del procedimiento y no debe omitirse bajo ninguna
+   circunstancia.
+
+Personalizacion de marca (pendiente).
+   La version 15 admite cambiar el nombre y el eslogan del sitio
+   mediante variables de entorno en docker-compose.prod.yml, sin tocar
+   app.ini manualmente:
+
+       - FORGEJO____APP_NAME=Clever Cloud
+       - FORGEJO____APP_SLOGAN=Git Server
+
+   Los cuatro guiones bajos representan la seccion DEFAULT del app.ini.
+   La aplicacion del cambio solo requiere recrear el contenedor server:
+
+       docker compose -f docker-compose.prod.yml up -d server
+
+   y la nueva marca aparece en la pestana del navegador, la pantalla de
+   login y el pie de pagina. Esta personalizacion queda diferida hasta
+   que el ingeniero en jefe apruebe el texto definitivo.
+
+
+==============================================================================
+                      PARTE II - MANUAL PARA USUARIOS FINALES
+==============================================================================
+
+Esta parte se entrega a cada empleado o residente al ser invitado al
+sistema. Esta redactada en lenguaje no tecnico y describe el flujo
+completo desde la recepcion de la invitacion hasta el primer push.
+
+
+------------------------------------------------------------------------------
+Capitulo 12. Recibir la invitacion y crear cuenta
+------------------------------------------------------------------------------
+
+El correo de invitacion proviene de la direccion corporativa que el
+administrador haya configurado como remitente del sistema. El asunto
+suele ser parecido a "You've been invited to join CleverCloud
+organization" y contiene un enlace unico personal.
+
+Al hacer clic en el enlace se abre una pagina de Forgejo para definir
+los datos de la cuenta. El campo Email aparece pre-llenado y no debe
+modificarse, ya que esta vinculado a la invitacion. El campo Username
+se elige libremente, sin espacios y solo con letras, numeros o
+guiones; la convencion sugerida es la combinacion de primer nombre y
+apellido, por ejemplo  juan-perez  o  jperez . La contrasena debe
+tener al menos ocho caracteres con letras y numeros.
+
+Tras enviar el formulario, el sistema envia un segundo correo de
+confirmacion de la direccion de email. Es necesario abrir ese correo
+y hacer clic en el enlace de verificacion para que la cuenta quede
+activa. Hasta ese momento, los intentos de login son rechazados
+incluso si la cuenta ya fue creada. Una vez confirmada la direccion,
+el usuario queda dentro de la organizacion CleverCloud con el rol
+asignado por el administrador (Developer, QA, ReleaseManager u otro
+segun corresponda).
+
+
+------------------------------------------------------------------------------
+Capitulo 13. Activar el segundo factor de autenticacion
+------------------------------------------------------------------------------
+
+La activacion del segundo factor (2FA) es opcional pero altamente
+recomendada para todas las cuentas, y obligatoria para las cuentas
+con permisos de Owner o ReleaseManager.
+
+El procedimiento es: hacer clic en el avatar en la esquina superior
+derecha, entrar en Settings, ir a Security, ir a Two-Factor
+Authentication y pulsar Enroll. Forgejo presenta un codigo QR que
+debe escanearse con una aplicacion compatible (Google Authenticator,
+Authy o el TOTP de un gestor de contrasenas como 1Password o
+Bitwarden). Tras escanear, se introduce el codigo de seis digitos
+generado por la aplicacion para confirmar la sincronizacion.
+
+Una vez activado, Forgejo presenta los Recovery Codes, que son la
+unica via de recuperacion si el dispositivo TOTP se pierde o se
+restablece. Estos codigos deben copiarse al gestor de contrasenas
+inmediatamente; cada codigo es de un solo uso y juntos forman el
+plan de continuidad personal.
+
+
+------------------------------------------------------------------------------
+Capitulo 14. Configurar SourceTree u otro cliente Git
+------------------------------------------------------------------------------
+
+El servidor expone los repositorios por los dos protocolos estandar
+de Git, HTTPS y SSH, idenitcos a los de cualquier otro servidor.
+SourceTree, VS Code, GitHub Desktop, GitKraken, las herramientas
+JetBrains y la CLI de git los soportan sin diferencias. La eleccion
+entre uno y otro depende de la preferencia del usuario.
+
+HTTPS es mas simple para arrancar porque no requiere generar llaves
+ni configurar archivos. SSH es mas comodo a largo plazo porque no
+solicita credenciales en cada operacion una vez configurado.
+
+
+   14.1. HTTPS con Personal Access Token
+
+      Por politica del servidor no se acepta la contrasena de login
+      como credencial para operaciones git por HTTPS. En su lugar
+      se utiliza un Personal Access Token (PAT) generado por el
+      propio usuario.
+
+      Para crear un PAT, ya iniciada la sesion en el sitio, hacer
+      clic en el avatar, abrir Settings, entrar en Applications,
+      entrar en Manage Access Tokens y pulsar Generate New Token.
+      Asignar un nombre descriptivo del cliente que lo va a usar,
+      por ejemplo  sourcetree-laptop-juan . En el listado de scopes
+      marcar el grupo  repo , que cubre todas las operaciones
+      normales de clone, pull y push; opcionalmente marcar  read:issue
+      y  write:issue  si el usuario va a interactuar con issues
+      desde la CLI o un script. Generar el token. Forgejo muestra
+      el token una unica vez, en el formato  gho_aBcDeF1234... ; ese
+      es el momento de copiarlo al gestor de contrasenas, ya que no
+      vuelve a ser visible.
+
+      En SourceTree, abrir File, Clone, pegar la URL HTTPS del
+      repositorio (por ejemplo
+      https://gitserver.clevercloud.app/CleverCloud/<repo>.git ),
+      elegir el Destination Path y pulsar Clone. Cuando SourceTree
+      pida credenciales, el campo de usuario es el username de
+      Forgejo y el campo de contrasena es el PAT, no la contrasena
+      real. SourceTree almacena la combinacion en el Credential
+      Manager local del sistema operativo y no la solicita
+      nuevamente.
+
+      Para revocar o rotar el token, regresar al mismo lugar
+      (Settings, Applications, Manage Access Tokens), seleccionar
+      el token y eliminarlo. Cualquier cliente que lo este usando
+      pierde el acceso de inmediato y debe configurarse con uno
+      nuevo.
+
+
+   14.2. SSH con llave publica
+
+      El primer paso es generar el par de llaves localmente, en la
+      PC del usuario. En PowerShell sobre Windows, en Terminal
+      sobre macOS o en la consola sobre Linux, ejecutar:
+
+          ssh-keygen -t ed25519 -C "tu-correo@empresa.com" \
+            -f ~/.ssh/forgejo_clevercloud
+
+      El comando genera dos archivos. El primero, sin extension, es
+      la llave privada y nunca debe salir de la maquina del
+      usuario. El segundo, con extension  .pub , es la llave
+      publica, que es la que se sube al servidor. El contenido de
+      la llave publica empieza con  ssh-ed25519 AAAAC3NzaC1...  y
+      se puede ver con  cat ~/.ssh/forgejo_clevercloud.pub  o el
+      equivalente segun el sistema.
+
+      En el sitio web, ya iniciada la sesion del usuario, abrir
+      Settings, entrar en SSH / GPG Keys, entrar en Manage SSH
+      Keys, pulsar Add Key. Asignar un nombre descriptivo del
+      equipo (por ejemplo  laptop-juan ) y pegar el contenido
+      completo de la llave publica en el campo Content. Pulsar Add
+      Key.
+
+      Para que el cliente SSH del sistema use automaticamente el
+      puerto 222 y la llave correcta sin tener que indicarlo en
+      cada URL, agregar al archivo  ~/.ssh/config  un bloque con
+      el siguiente contenido:
+
+          Host gitserver.clevercloud.app
+              HostName gitserver.clevercloud.app
+              User git
+              Port 222
+              IdentityFile ~/.ssh/forgejo_clevercloud
+
+      Con esa configuracion, las URLs SSH se simplifican al
+      formato  git@gitserver.clevercloud.app:CleverCloud/<repo>.git
+      sin necesidad de indicar  :222/  explicitamente. La
+      verificacion de conectividad se hace con
+
+          ssh -T git@gitserver.clevercloud.app
+
+      La respuesta esperada es un saludo de Forgejo del tipo
+      "Hi <username>! You've successfully authenticated...".
+
+
+------------------------------------------------------------------------------
+Capitulo 15. Cambiar repositorios desde Bitbucket
+------------------------------------------------------------------------------
+
+Quien ya tenga uno o mas repositorios clonados desde Bitbucket en su
+maquina no necesita re-clonar para empezar a trabajar contra
+Forgejo. Lo unico que cambia es la URL del remote.
+
+En SourceTree el procedimiento es: abrir el repositorio, ir a
+Repository, abrir Repository Settings, ir a la pestana Remotes,
+seleccionar el remote llamado  origin , pulsar Edit, sustituir la
+URL por la equivalente en Forgejo y pulsar OK.
+
+En la linea de comandos el procedimiento equivalente es:
+
+    cd /ruta/al/repositorio
+    git remote set-url origin <nueva-url>
+    git remote -v
+
+A partir de ese cambio todos los flujos de trabajo (branches, pull
+requests, push, pull) operan contra Forgejo. Lo unico que cambia es
+el destino de las operaciones; los commits, ramas y archivos locales
+no se ven afectados.
+
+
+------------------------------------------------------------------------------
+Capitulo 16. Solucion de problemas comunes
+------------------------------------------------------------------------------
+
+Authentication failed sobre HTTPS.
+   Indica que la credencial usada no es valida. La causa habitual es
+   estar utilizando la contrasena del sitio en lugar del Personal
+   Access Token. La solucion es generar un PAT segun el procedimiento
+   del capitulo 14.1 y configurarlo en el cliente Git.
+
+Permission denied (publickey) sobre SSH.
+   Indica que el servidor no reconoce la llave que el cliente esta
+   ofreciendo. Las causas mas frecuentes son que la llave publica
+   correspondiente nunca fue subida a la cuenta de Forgejo, o que la
+   configuracion SSH local apunta a una llave privada distinta a la
+   pareja de la subida. La solucion es revisar la pestana SSH / GPG
+   Keys en Settings y verificar el archivo  ~/.ssh/config .
+
+Connection refused o timeouts sobre SSH.
+   Indica que la conexion no llega al servidor. La causa habitual es
+   que la URL no incluye el puerto 222 (que es el puerto SSH de
+   Forgejo, distinto del 22 estandar) o que el firewall externo del
+   panel de DigitalOcean todavia no tiene la regla Inbound TCP 222
+   abierta. Mientras esa regla no exista, las operaciones SSH no
+   funcionan; HTTPS con PAT si funciona y es la alternativa hasta
+   que se complete la apertura.
+
+No aparece un repositorio esperado.
+   Indica que el usuario no esta en ningun team con acceso al
+   repositorio en cuestion. La accion correctiva la realiza el
+   administrador, agregando al usuario al team adecuado de la
+   organizacion CleverCloud. Los repositorios privados solo son
+   visibles para los miembros con permisos asignados.
+
+==============================================================================
+                              FIN DEL MANUAL
+==============================================================================

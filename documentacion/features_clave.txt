@@ -1,0 +1,290 @@
+==============================================================================
+                          FEATURES CLAVE
+              Servidor Git Interno - Forgejo en Clever Cloud
+==============================================================================
+
+Este documento lista las funcionalidades principales que ofrece el
+servidor Git interno al equipo. Esta dirigido a desarrolladores,
+QA, lideres de equipo y residentes que van a usar la plataforma
+todos los dias. No es una guia de instalacion ni de operacion del
+servidor, sino una referencia de lo que SE PUEDE HACER en el.
+
+
+==============================================================================
+1. AUTENTICACION Y ACCESO
+==============================================================================
+
+   Login con email corporativo.
+      Los usuarios entran con el mismo correo que usaban en
+      Bitbucket. No hay que registrarse de nuevo, la cuenta ya
+      esta creada por el admin.
+
+   Cambio de contrasena en primer login.
+      La primera vez que un usuario entra con su contrasena
+      temporal (clever4312), el sistema lo redirige a cambiarla
+      por una propia. Es obligatorio, no se puede saltar.
+
+   Autenticacion en dos pasos (2FA).
+      Disponible para todos los usuarios. Compatible con Google
+      Authenticator, Authy, 1Password y cualquier app TOTP.
+      Settings -> Security -> Two-Factor Authentication.
+
+   Recuperacion de contrasena.
+      Via correo electronico. El sistema envia un link de reset
+      al email registrado. Requiere SMTP funcionando.
+
+   Sesiones persistentes.
+      El usuario sigue logueado en su navegador hasta que cierre
+      sesion manualmente o expire el token (60 dias por defecto).
+
+
+==============================================================================
+2. GESTION DE REPOSITORIOS
+==============================================================================
+
+   Crear repositorios.
+      Cualquier usuario puede crear repos en su namespace personal.
+      Los repos de la organizacion CleverCloud solo los crea el
+      admin o un miembro con permisos.
+
+   Clonar por HTTPS.
+      git clone https://gitserver.clevercloud.app/CleverCloud/<repo>.git
+      Requiere Personal Access Token como contrasena al hacer push.
+
+   Clonar por SSH (puerto 222).
+      git clone ssh://git@gitserver.clevercloud.app:222/CleverCloud/<repo>.git
+      Requiere llave SSH publica cargada en el perfil.
+
+   Push, pull, fetch, branches, tags.
+      Funcionan igual que en Bitbucket. Mismos comandos de git,
+      misma sintaxis.
+
+   Historial completo preservado.
+      Los repos migrados conservan TODO el historial de commits,
+      branches y tags. No se pierde nada en la migracion.
+
+   Archivar repositorios.
+      Repos sin uso se pueden archivar (read-only) desde Settings
+      del repo, sin borrarlos.
+
+
+==============================================================================
+3. PULL REQUESTS Y CODE REVIEW
+==============================================================================
+
+   Crear PRs entre branches.
+      Mismo flujo que Bitbucket: crear branch, push, abrir PR
+      desde la UI.
+
+   Reviews con aprobaciones y comentarios.
+      Los reviewers pueden aprobar, pedir cambios o dejar
+      comentarios linea por linea.
+
+   Merge strategies disponibles.
+      - Merge commit (default).
+      - Rebase.
+      - Squash and merge.
+      - Fast-forward only.
+
+   Branch protection.
+      Configurable por branch. Se puede exigir:
+      - Numero minimo de aprobaciones.
+      - Status checks verdes (CI).
+      - No permitir force-push.
+      - No permitir borrar la branch.
+
+   Plantillas de PR.
+      Se puede agregar un archivo .gitea/PULL_REQUEST_TEMPLATE.md
+      en el repo para que se precargue al abrir un PR.
+
+
+==============================================================================
+4. ORGANIZACIONES Y TEAMS
+==============================================================================
+
+   Organizacion principal: CleverCloud.
+      Es donde viven todos los repos del equipo. Cada repo
+      pertenece a la organizacion, no a un usuario individual.
+
+   Teams configurados.
+      - Developers: read+write en repos de desarrollo.
+      - QA: read en todos, write en repos de pruebas.
+      - ReleaseManagers: admin en repos productivos.
+      - Owners: control total de la organizacion.
+
+   Permisos granulares.
+      Cada team tiene permisos especificos por repo o por tipo
+      de repo. Lo configura el admin.
+
+   Visibilidad de repos.
+      Todos los repos de CleverCloud son privados. No hay repos
+      publicos visibles desde internet.
+
+
+==============================================================================
+5. ISSUES Y SEGUIMIENTO
+==============================================================================
+
+   Issues por repositorio.
+      Cada repo tiene su tracker de issues integrado.
+
+   Labels personalizables.
+      bug, enhancement, question, etc. Configurables por repo o
+      por organizacion.
+
+   Milestones.
+      Agrupar issues y PRs por hitos o sprints.
+
+   Asignaciones y menciones.
+      Asignar issues a usuarios, mencionar con @usuario.
+
+   Cierre automatico por commit.
+      Mensajes como "fixes #42" cierran el issue cuando el PR
+      se mergea.
+
+
+==============================================================================
+6. CREDENCIALES DE GIT
+==============================================================================
+
+   Personal Access Tokens (PAT).
+      Para autenticarse desde la linea de comandos por HTTPS.
+      Se crean en Settings -> Applications.
+      Granularidad por scope (read repos, write repos, etc.).
+      Se pueden revocar individualmente sin tocar la contrasena.
+
+   Llaves SSH.
+      Se cargan en Settings -> SSH Keys.
+      Puerto del servidor: 222.
+      Recomendado para uso diario; no requiere escribir
+      contrasena en cada push.
+
+   Llaves GPG (firma de commits).
+      Disponibles para firmar commits y tags.
+      Settings -> GPG Keys.
+
+
+==============================================================================
+7. MIGRACION DE REPOSITORIOS
+==============================================================================
+
+   Pull mirror desde Bitbucket.
+      Forgejo sincroniza automaticamente con un repo remoto
+      cada X horas. Util durante la transicion.
+
+   Migracion como repo regular.
+      Importa el repo una sola vez con todo su historial.
+      Se hace desde la UI: "+" -> "Migrate Repository".
+
+   Conversion de mirror a regular.
+      Cuando se decide cortar la sincronizacion: Settings ->
+      Mirror Settings -> "Convert to regular repository".
+
+   LFS (Large File Storage).
+      Forgejo soporta LFS para archivos binarios grandes.
+      Limitacion conocida: el pull mirror no replica blobs LFS
+      nuevos. Para repos con LFS, hacer migracion como repo
+      regular en lugar de mirror.
+
+
+==============================================================================
+8. WEBHOOKS E INTEGRACIONES
+==============================================================================
+
+   Webhooks por repositorio.
+      Notifican a una URL externa cuando ocurren eventos:
+      push, PR, issue, comentario, release.
+      Compatible con formato Gitea, GitHub y Slack.
+
+   Eventos disponibles.
+      - push
+      - issues / issue_comment
+      - pull_request / pull_request_comment
+      - release
+      - branch / tag created/deleted
+      - repository
+      - wiki
+
+   Reintentos automaticos.
+      Si el endpoint responde con error, el webhook se reintenta.
+
+
+==============================================================================
+9. NOTIFICACIONES POR CORREO
+==============================================================================
+
+   El sistema envia correos en estos casos:
+
+   - Mencion en un issue o PR.
+   - Asignacion de un issue o PR.
+   - Cambio de estado en un PR donde participas.
+   - Comentarios en PRs que estas siguiendo.
+   - Alertas de seguridad (login nuevo, cambio de email).
+
+   Cada usuario puede configurar el nivel de notificaciones en
+   Settings -> Notifications.
+
+
+==============================================================================
+10. INTERFAZ WEB
+==============================================================================
+
+   Editor de codigo en linea.
+      Permite editar archivos directamente en el navegador, util
+      para fix tipograficos rapidos o ediciones de README.
+
+   Visor de diffs.
+      Muestra cambios commit por commit con resaltado de sintaxis.
+
+   Busqueda de codigo.
+      Buscar texto en archivos, dentro de un repo o de toda la
+      organizacion.
+
+   Visualizacion de issues y PRs filtrable.
+      Filtros por estado, autor, asignado, label, milestone.
+
+   Tema claro/oscuro.
+      Cada usuario elige en Settings -> Appearance.
+
+
+==============================================================================
+11. API REST
+==============================================================================
+
+   API completa compatible con Gitea/Forgejo.
+      Documentacion en /api/swagger.
+      Autenticacion con PAT.
+      Permite automatizar:
+      - Creacion de repos.
+      - Apertura de issues y PRs.
+      - Gestion de usuarios.
+      - Consulta de commits y branches.
+
+
+==============================================================================
+12. LIMITES Y CAPACIDADES
+==============================================================================
+
+   Tamano maximo de repo recomendado.
+      Sin limite duro, pero por encima de 5 GB se recomienda
+      mover binarios a LFS.
+
+   Tamano maximo de archivo (no LFS).
+      100 MB por defecto.
+
+   Numero de usuarios.
+      Sin limite por licencia (Forgejo es libre).
+
+   Numero de repositorios.
+      Sin limite por licencia. Limitado solo por disco del
+      droplet.
+
+   Disponibilidad.
+      Best-effort. El servicio depende de un solo droplet, sin
+      alta disponibilidad. Mantenimientos planeados se anuncian
+      con anticipacion.
+
+
+==============================================================================
+                          FIN DEL DOCUMENTO
+==============================================================================

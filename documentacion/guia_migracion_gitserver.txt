@@ -1,0 +1,402 @@
+==============================================================================
+              GUIA DE MIGRACION A CLEVER CLOUD GITSERVER
+                    Instructivo para todo el equipo
+                          Clever Cloud
+==============================================================================
+
+Esta guia esta dirigida a TI, miembro del equipo de Clever Cloud,
+que vas a dejar de usar Bitbucket y empezar a usar nuestro nuevo
+servidor Git interno. Esta dividida en dos partes:
+
+   PARTE A - Activacion de tu cuenta (hazlo HOY).
+   PARTE B - Migracion de tu trabajo local (hazlo el dia del corte).
+
+Sigue las partes en orden. La Parte A se hace una sola vez y dura
+menos de 2 minutos. La Parte B se hace cuando se anuncie la fecha
+oficial del switchover.
+
+
+==============================================================================
+                          INFORMACION CLAVE
+==============================================================================
+
+   Direccion del nuevo servidor:
+      https://gitserver.clevercloud.app
+
+   Tu usuario:
+      El MISMO correo electronico que usabas en Bitbucket.
+
+   Tu contrasena temporal (solo el primer login):
+      clever4312
+
+   Puerto SSH del servidor:
+      222 (no es el 22 estandar)
+
+
+==============================================================================
+                  PARTE A - ACTIVACION DE TU CUENTA
+==============================================================================
+
+Tu cuenta YA fue creada por el equipo de DevOps con el mismo correo
+que usas en Bitbucket. No necesitas registrarte ni pedir invitacion.
+Solo entra al servidor, cambia la contrasena temporal por una
+propia, y listo. No empieces a trabajar en Forgejo todavia; esta
+parte es solo para confirmar que tu cuenta funciona.
+
+
+------------------------------------------------------------------------------
+PASO 1 - Abre el servidor en tu navegador
+------------------------------------------------------------------------------
+
+Entra a la direccion:
+
+   https://gitserver.clevercloud.app
+
+Guardala en favoritos para acceder rapido despues. Veras la
+pantalla de bienvenida de Forgejo. Da clic en el boton "Sign In"
+(Iniciar sesion), arriba a la derecha.
+
+
+------------------------------------------------------------------------------
+PASO 2 - Inicia sesion con tu correo de Bitbucket
+------------------------------------------------------------------------------
+
+En el campo "Username or Email Address" escribe el MISMO correo
+electronico que usas en Bitbucket. No uses un correo distinto, ese
+es el que ya esta asociado a tu cuenta.
+
+   Usuario / Email:  tu.correo@clevercloud.mx
+   Contrasena:       clever4312
+
+Da clic en "Sign In" para continuar.
+
+
+------------------------------------------------------------------------------
+PASO 3 - Cambia tu contrasena en el primer login
+------------------------------------------------------------------------------
+
+Como medida de seguridad, el sistema te redirigira automaticamente
+a la pantalla "Change Password". Esto pasa solo en tu primer
+ingreso y es obligatorio: no podras usar el servidor hasta que la
+cambies.
+
+Te pedira llenar dos campos:
+
+   Password:         elige una contrasena nueva, solo tuya
+   Re-Type Password: escribela otra vez para confirmar
+
+Tu nueva contrasena debe tener:
+
+   - Minimo 8 caracteres.
+   - Al menos una mayuscula (A-Z).
+   - Al menos una minuscula (a-z).
+   - Al menos un numero (0-9).
+   - Idealmente un caracter especial (! @ # $ % & *).
+
+IMPORTANTE: guarda tu nueva contrasena en un lugar seguro (1Password,
+Bitwarden o el llavero de tu navegador). Si la pierdes, tendras que
+solicitar una nueva contrasena temporal a tu lider de equipo.
+
+Da clic en "Save Password" para confirmar.
+
+
+------------------------------------------------------------------------------
+PASO 4 - Verifica que tu sesion esta activa
+------------------------------------------------------------------------------
+
+Despues de guardar la contrasena, el sistema te llevara al
+Dashboard (pagina principal). Aqui veras los repositorios a los
+que tienes acceso.
+
+Confirma que todo este bien revisando estos puntos:
+
+   - Arriba a la derecha aparece tu avatar (foto o inicial).
+   - Al dar clic en el avatar ves tu nombre de usuario y correo.
+   - En el menu lateral aparecen los repositorios de tu equipo.
+
+Si NO ves tus repositorios, no te preocupes. Es probable que aun
+esten siendo asignados. Espera unas horas o contacta a tu lider
+de equipo.
+
+
+------------------------------------------------------------------------------
+PASO 5 - Revisa y completa tu perfil
+------------------------------------------------------------------------------
+
+Da clic en tu avatar (arriba a la derecha) y entra a "Settings".
+En la pestana "Profile" revisa que tus datos esten correctos:
+
+   - Full Name: tu nombre completo, como quieres que aparezca
+     en los commits.
+   - Email: verifica que sea el mismo de Bitbucket.
+   - Description / Bio: opcional, puedes agregar tu rol o equipo.
+   - Avatar: sube una foto si gustas.
+
+Da clic en "Update Profile" para guardar los cambios.
+
+
+------------------------------------------------------------------------------
+PASO 6 - Cierre de la Parte A
+------------------------------------------------------------------------------
+
+Tu cuenta esta confirmada. Por ahora NO empieces a trabajar desde
+Git Clever Cloud. Sigue usando Bitbucket como siempre hasta el
+dia del corte. Esta parte era solo para confirmar tu cuenta y
+dejarla lista.
+
+Mientras llega la fecha de migracion:
+
+   - Ten a la mano la direccion del servidor
+     (https://gitserver.clevercloud.app) y tu nueva contrasena.
+   - Estate atento al correo de aviso con la fecha exacta del
+     switchover.
+   - Cuando llegue ese dia, sigue la Parte B de esta guia.
+
+
+==============================================================================
+              PARTE B - MIGRACION DE TU TRABAJO LOCAL
+==============================================================================
+
+Esta parte la haces el dia del corte (switchover), cuando el equipo
+de DevOps avise oficialmente que Bitbucket pasa a modo solo lectura
+y Forgejo es el sistema vivo. La idea es que tu repo clonado en
+local cambie de "origin" para apuntar al nuevo servidor.
+
+
+------------------------------------------------------------------------------
+PASO 7 - Activa la autenticacion en dos pasos (2FA) - RECOMENDADO
+------------------------------------------------------------------------------
+
+Antes de empezar a trabajar contra el nuevo servidor, activa 2FA
+para proteger tu cuenta. Ve a:
+
+   Settings -> Security -> Two-Factor Authentication
+
+Pasos:
+
+   1. Abre tu app autenticadora (Google Authenticator, Authy,
+      1Password).
+   2. Escanea el codigo QR que aparece en pantalla.
+   3. Escribe el codigo de 6 digitos que te genera la app.
+   4. Guarda los codigos de recuperacion en un lugar seguro:
+      son tu unico respaldo si pierdes el celular.
+
+Sin 2FA tu cuenta queda mas expuesta. Si tu equipo lo exige no
+podras acceder a ciertos repositorios. Activalo de una vez para
+evitar el bloqueo despues.
+
+
+------------------------------------------------------------------------------
+PASO 8 - Genera tu credencial Git (PAT o SSH)
+------------------------------------------------------------------------------
+
+Para que tu computadora pueda hacer push y pull contra el nuevo
+servidor, necesitas una credencial. Hay dos opciones; usa la que
+prefieras o ambas:
+
+Opcion A: Personal Access Token (HTTPS)
+   Si trabajas por HTTPS, lo mas comodo es crear un PAT.
+
+   Settings -> Applications -> Generate New Token
+
+      Token Name:  un nombre que recuerdes (ej. "Laptop personal")
+      Scopes:      activa al menos "write:repository"
+                   (para clonar, push y pull)
+
+   Copia el token cuando se genere. Es la UNICA vez que se ve;
+   despues queda oculto. Si lo pierdes hay que generar otro.
+
+   Cuando hagas git push o git pull, te pedira usuario y contrasena.
+   El usuario es tu nombre de usuario de Forgejo. La contrasena es
+   el PAT, NO tu contrasena de login.
+
+Opcion B: Llave SSH (puerto 222)
+   Si prefieres SSH, sube tu llave publica.
+
+   Settings -> SSH / GPG Keys -> Add Key
+
+      Key Name:    nombre que recuerdes (ej. "Laptop personal")
+      Content:     pega el contenido de tu archivo .pub
+                   (ej. ~/.ssh/id_ed25519.pub)
+
+   Si no tienes llave SSH, genera una:
+
+      ssh-keygen -t ed25519 -C "tu.correo@clevercloud.mx"
+
+   La llave PRIVADA (sin .pub) NUNCA se comparte ni se sube.
+
+   El puerto SSH del servidor es 222 (no el 22 estandar). Tu URL
+   de remote SSH se vera asi:
+
+      ssh://git@gitserver.clevercloud.app:222/CleverCloud/<repo>.git
+
+
+------------------------------------------------------------------------------
+PASO 9 - Cambia la URL del remote en tus repos locales
+------------------------------------------------------------------------------
+
+NO necesitas re-clonar tus repositorios. Tu historial local sigue
+siendo valido. Solo cambia la URL del remote "origin" para que
+apunte al nuevo servidor.
+
+Para cada repo que tengas clonado en tu computadora:
+
+Opcion A: por linea de comandos
+
+   cd <carpeta del repo>
+
+   # Ver la URL actual:
+   git remote -v
+
+   # Cambiarla por la nueva (HTTPS):
+   git remote set-url origin https://gitserver.clevercloud.app/CleverCloud/<repo>.git
+
+   # O SSH (puerto 222):
+   git remote set-url origin ssh://git@gitserver.clevercloud.app:222/CleverCloud/<repo>.git
+
+   # Verifica:
+   git remote -v
+
+Opcion B: en SourceTree
+
+   Repository -> Repository Settings -> Remotes -> Edit "origin"
+   Pega la URL nueva y guarda.
+
+Opcion C: en GitKraken / VS Code / otro cliente
+
+   Busca "Remote" o "Origin" en los settings del repo y reemplaza
+   la URL.
+
+Despues del cambio, haz un git fetch para validar:
+
+   git fetch origin
+
+Si te pide usuario y contrasena, usa tu usuario de Forgejo y el
+PAT que generaste en el Paso 8 (Opcion A) o no te pedira nada si
+estas usando SSH.
+
+
+------------------------------------------------------------------------------
+PASO 10 - Validacion final
+------------------------------------------------------------------------------
+
+Antes de dar por terminada la migracion, valida que todo funcione:
+
+   [ ] git pull origin <tu branch> funciona sin error.
+   [ ] git push origin <tu branch> funciona sin error.
+   [ ] Puedes ver tus repos en https://gitserver.clevercloud.app.
+   [ ] Puedes abrir y comentar un Pull Request.
+   [ ] Las notificaciones llegan a tu correo (cuando alguien te
+       menciona o asigna un PR).
+
+Si los cinco puntos pasan, has migrado correctamente.
+
+
+==============================================================================
+                    QUE CAMBIA Y QUE NO CAMBIA
+==============================================================================
+
+   Lo que NO cambia:
+      - Tu flujo diario (commit, push, pull, PR, merge, branches).
+      - Los comandos de git.
+      - Tu historial de commits (se conserva completo).
+      - Tu correo de trabajo.
+
+   Lo que SI cambia:
+      - La URL del servidor (de bitbucket.org a
+        gitserver.clevercloud.app).
+      - Tu contrasena (es nueva, no la de Bitbucket).
+      - La credencial para push (PAT en lugar de contrasena de
+        login).
+      - El puerto SSH (222 en lugar de 22).
+      - La interfaz web (Forgejo en lugar de Bitbucket).
+
+
+==============================================================================
+                          PROBLEMAS COMUNES
+==============================================================================
+
+Problema - "Authentication failed" al hacer git push (HTTPS).
+   Causa - estas usando tu contrasena de login en vez del PAT.
+   Solucion - regenera un PAT en Settings -> Applications y usalo
+   como contrasena cuando git lo pida.
+
+Problema - "Permission denied (publickey)" al hacer git push (SSH).
+   Causa probable - la llave SSH no esta cargada en Forgejo, o
+   estas usando el puerto 22 en lugar del 222.
+   Solucion - revisa que subiste la llave correcta en Settings,
+   y que la URL del remote tenga ":222". Tambien puedes probar:
+
+      ssh -T -p 222 git@gitserver.clevercloud.app
+
+   Debe responderte con tu nombre de usuario.
+
+Problema - "Repository not found" al clonar.
+   Causa - estas usando una URL vieja de Bitbucket, o no tienes
+   permiso al repo, o el repo aun no esta migrado.
+   Solucion - verifica la URL en gitserver.clevercloud.app y
+   contacta a tu lider de equipo si el repo no esta visible.
+
+Problema - "Could not resolve host: gitserver.clevercloud.app".
+   Causa - problemas de DNS o de VPN.
+   Solucion - confirma que tienes internet, intenta hacer ping
+   al dominio, y verifica con DevOps si requiere VPN para
+   acceder.
+
+Problema - No recibo correos de notificaciones.
+   Causa probable - tu correo cayo en spam, o no esta activado
+   en tu perfil.
+   Solucion - revisa la carpeta de spam, verifica tu email en
+   Settings -> Account, y confirma que tus notificaciones estan
+   habilitadas en Settings -> Notifications.
+
+Problema - Perdi mi contrasena.
+   Solucion - usa el flujo "Forgot Password?" de la pantalla de
+   login. Te llegara un link de reset por correo. Si no llega o
+   no funciona, contacta al equipo de DevOps para generar una
+   nueva contrasena temporal.
+
+Problema - Perdi el celular con el codigo 2FA.
+   Solucion - usa uno de los codigos de recuperacion que
+   guardaste al activar 2FA. Si tampoco los tienes, contacta al
+   equipo de DevOps; pueden desactivar 2FA manualmente despues
+   de verificar tu identidad.
+
+
+==============================================================================
+                      DESPUES DEL SWITCHOVER
+==============================================================================
+
+Despues del corte oficial, Bitbucket pasa a modo SOLO LECTURA
+durante un periodo de gracia (tipicamente 30 dias). Eso significa:
+
+   - Puedes seguir CONSULTANDO Bitbucket si necesitas referencias
+     antiguas (issues, PRs, URLs viejas).
+   - NO PUEDES hacer push a Bitbucket. Todos los pushes nuevos
+     deben ir a gitserver.clevercloud.app.
+   - Si por error pusheas a Bitbucket (porque olvidaste cambiar
+     un remote), te dara error de "permission denied". Eso es
+     esperado.
+
+Al cierre del periodo de gracia, Bitbucket se cancela
+definitivamente. A partir de ese momento, gitserver.clevercloud.app
+es la unica fuente de verdad.
+
+
+==============================================================================
+                              CONTACTO
+==============================================================================
+
+Si tienes dudas, problemas tecnicos o no encuentras tu repo:
+
+   - Primer contacto: el embajador de tu equipo (frontend,
+     backend, QA, etc.).
+   - Segundo contacto: equipo de DevOps / infra
+     (claudepro@clevercloud.mx).
+   - Documentacion adicional en la zona de Documentacion de
+     Clever Ops.
+
+
+==============================================================================
+                          FIN DEL DOCUMENTO
+==============================================================================

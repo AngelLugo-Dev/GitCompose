@@ -1,0 +1,206 @@
+==============================================================================
+                        DEFINITION OF READY (DoR)
+              Proyecto: Migracion a Forgejo - Clever Cloud
+==============================================================================
+
+Este documento define los criterios que una tarea, historia o
+cambio debe cumplir ANTES de aceptarse en un sprint o iniciar su
+ejecucion. Un item que no cumple el DoR no debe trabajarse: se
+regresa al backlog hasta que este listo.
+
+El DoR no es lo mismo que el Definition of Done (DoD). El DoR
+mira hacia atras: "esta esto listo para empezarse?". El DoD mira
+hacia adelante: "esta esto listo para considerarse terminado?".
+
+
+==============================================================================
+1. POR QUE EXISTE EL DoR
+==============================================================================
+
+   - Evita que el equipo arranque trabajo sin contexto suficiente
+     y termine bloqueado a la mitad esperando respuestas.
+   - Reduce retrabajo causado por requerimientos ambiguos.
+   - Hace explicitos los supuestos antes de que cuesten tiempo.
+   - Da poder al equipo para rechazar trabajo mal definido sin
+     entrar en discusion politica con stakeholders.
+
+
+==============================================================================
+2. DoR GENERAL - APLICA A CUALQUIER ITEM
+==============================================================================
+
+Antes de aceptar cualquier tarea en sprint, los siguientes
+criterios deben cumplirse:
+
+   [ ] Tiene titulo claro y conciso.
+   [ ] Tiene una descripcion que explica el "que" y el "por que".
+   [ ] Tiene criterios de aceptacion verificables (no ambiguos).
+   [ ] Esta priorizada por el responsable del proyecto.
+   [ ] Tiene un responsable asignado o asignable.
+   [ ] No depende de tareas externas que no estan listas (o las
+       dependencias estan documentadas y desbloqueadas).
+   [ ] Tiene una estimacion de esfuerzo (horas, puntos, talla).
+   [ ] El equipo entiende lo que hay que hacer (preguntas
+       resueltas en refinement).
+
+
+==============================================================================
+3. DoR ESPECIFICO PARA TAREAS DE MIGRACION DE REPOS
+==============================================================================
+
+Para una tarea del tipo "migrar repositorio X de Bitbucket a
+Forgejo", ademas del DoR general, se requiere:
+
+   [ ] El repo aparece en el listado oficial de repos a migrar
+       (firmado por el ingeniero en jefe).
+   [ ] Esta clasificado por criticidad (alta, media, baja).
+   [ ] Esta identificado el equipo responsable del repo.
+   [ ] Esta identificado el embajador del equipo afectado.
+   [ ] Se sabe si el repo usa LFS (y si si, se decide entre
+       pull mirror o migracion regular).
+   [ ] Esta confirmado el tamano aproximado del repo.
+   [ ] Esta identificado si tiene pipelines de CI asociados.
+   [ ] Esta acordada la ventana de migracion con el equipo
+       afectado (dia y horario).
+   [ ] Existe un plan de rollback documentado para ese repo.
+   [ ] El responsable tecnico tiene acceso al droplet y al
+       workspace de Bitbucket origen.
+
+
+==============================================================================
+4. DoR ESPECIFICO PARA ALTAS DE USUARIO
+==============================================================================
+
+Para crear cuenta a un usuario nuevo en Forgejo:
+
+   [ ] Existe el correo del usuario, verificado con el lider de
+       equipo (debe ser el mismo que usa en Bitbucket).
+   [ ] Esta definido a que team(s) pertenece el usuario.
+   [ ] Esta definido si necesita permisos de admin o solo
+       desarrollador.
+   [ ] El usuario ha sido notificado de que va a recibir su
+       cuenta (no se debe sorprender con un correo).
+   [ ] Esta acordado el canal por el que se le envia la
+       contrasena temporal (correo o canal interno).
+
+
+==============================================================================
+5. DoR ESPECIFICO PARA CAMBIOS EN INFRAESTRUCTURA
+==============================================================================
+
+Para cambios en el droplet, docker-compose, .env, Caddy o
+backups:
+
+   [ ] El cambio esta justificado (que problema resuelve o que
+       riesgo mitiga).
+   [ ] Se evaluo el riesgo sobre datos (volumenes, base de
+       datos).
+   [ ] Esta documentado el procedimiento de rollback paso a
+       paso.
+   [ ] Se identifico el downtime estimado.
+   [ ] Esta acordada una ventana de mantenimiento si el
+       downtime supera 1 minuto.
+   [ ] Hay backup reciente verificado antes de empezar.
+   [ ] Esta identificado quien valida el resultado final.
+
+
+==============================================================================
+6. DoR ESPECIFICO PARA DOCUMENTACION
+==============================================================================
+
+Para crear o actualizar documentacion (manuales, guias,
+runbooks):
+
+   [ ] Esta claro el publico objetivo (DevOps, desarrolladores,
+       residentes, lideres).
+   [ ] Esta claro el formato esperado (txt, HTML, Markdown).
+   [ ] Esta definido donde se publica (Clever Ops, repo, docs
+       internos).
+   [ ] Si reemplaza documentacion existente, esta identificado
+       el documento original.
+   [ ] Esta acordado el nivel de detalle (resumen ejecutivo,
+       paso a paso, referencia completa).
+   [ ] El revisor esta asignado.
+
+
+==============================================================================
+7. DoR ESPECIFICO PARA CAPACITACION O ONBOARDING
+==============================================================================
+
+Para sesiones en vivo, talleres o material de capacitacion:
+
+   [ ] Esta definida la audiencia (equipo entero, embajadores,
+       lideres).
+   [ ] Esta definida la duracion.
+   [ ] Esta definido el formato (presencial, videollamada,
+       hibrido).
+   [ ] Esta acordada la fecha y hora con la audiencia.
+   [ ] El material de soporte esta listo (slides, demo, docs).
+   [ ] Hay un plan B si falla algo (la demo se graba, hay
+       backup de la grabacion).
+   [ ] Se sabe como se va a medir la efectividad (asistencia,
+       feedback, % de gente que completa onboarding despues).
+
+
+==============================================================================
+8. DoR ESPECIFICO PARA SWITCHOVER (CORTE DEFINITIVO)
+==============================================================================
+
+Este es el DoR mas estricto del proyecto. Antes de ejecutar el
+corte definitivo de Bitbucket a Forgejo:
+
+   [ ] El 100% de los repos productivos estan migrados y
+       activos en Forgejo.
+   [ ] El 100% del equipo activo tiene cuenta y la activo (paso
+       por el cambio de contrasena).
+   [ ] Hay un backup reciente (menor a 24h) verificado del
+       droplet completo.
+   [ ] Hay un backup reciente (menor a 24h) del workspace de
+       Bitbucket.
+   [ ] El plan de rollback de Fase 4 esta firmado por el
+       ingeniero en jefe.
+   [ ] La fecha y hora del corte estan comunicadas al equipo
+       con minimo 5 dias laborales de anticipacion.
+   [ ] Hay un responsable on-call durante las 24h siguientes al
+       corte.
+   [ ] El SMTP esta funcionando (probado el dia anterior).
+   [ ] Los pipelines de CI relevantes apuntan ya a Forgejo o
+       tienen una accion programada para apuntar en el momento
+       del corte.
+   [ ] Esta identificada la persona que cierra Bitbucket en
+       branch protection (puede ser el admin del workspace).
+
+
+==============================================================================
+9. QUE HACER SI UN ITEM NO CUMPLE EL DoR
+==============================================================================
+
+   1. NO se mete al sprint.
+   2. Se regresa al backlog con un comentario que liste los
+      criterios faltantes.
+   3. El responsable del item resuelve los criterios faltantes.
+   4. En el siguiente refinement, se revisa de nuevo.
+
+No hay excepciones: si un criterio critico (rollback, backup,
+ventana acordada) falta, no se empieza la tarea. Saltarse el DoR
+es la causa numero uno de incidentes en migraciones.
+
+
+==============================================================================
+10. RESPONSABLES DEL DoR
+==============================================================================
+
+   - Responsable de la migracion (ingeniero en jefe): valida que
+     el DoR especifico de switchover este completo.
+   - Responsable tecnico (operador de Forgejo): valida el DoR
+     general y los DoR de migracion de repos, altas, infra y
+     documentacion.
+   - Embajadores por equipo: validan el DoR para las migraciones
+     de repos de su area.
+   - Todo el equipo: tiene derecho a rechazar un item que no
+     cumpla el DoR durante refinement.
+
+
+==============================================================================
+                          FIN DEL DOCUMENTO
+==============================================================================

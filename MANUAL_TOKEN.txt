@@ -1,0 +1,139 @@
+
+                  PARTE I - QUE ES Y POR QUE EXISTE
+
+
+------------------------------------------------------------------------------
+Capitulo 1. Como funciona el envio de correo en Forgejo
+------------------------------------------------------------------------------
+
+Proposito.
+   Entender que esta haciendo Forgejo cuando manda un correo, para que el
+   resto del manual deje de parecer una receta y se vuelva una secuencia
+   con sentido.
+
+Concepto.
+   Forgejo no contiene un servidor de correo. Lo que tiene es un cliente
+   SMTP, es decir, un componente que se conecta a un servidor externo y
+   le pide a ese servidor que entregue el mensaje al destinatario final.
+   El servidor externo se llama  relay  o  servidor saliente . En este
+   despliegue ese relay sera Gmail.
+
+   Para que Gmail acepte enviar correo en nombre de una cuenta concreta,
+   exige que el cliente SMTP se autentique. La autenticacion consiste en
+   presentar dos datos: la direccion de la cuenta ( usuario ) y un secreto
+   ( contrasena ). Hasta 2022 ese secreto podia ser la misma contrasena
+   con la que la persona inicia sesion en gmail.com. Desde mayo de 2022
+   Google retiro esa opcion por seguridad y exige que el cliente use un
+   secreto distinto, generado especificamente para esa aplicacion. Ese
+   secreto es el  App Password , tambien llamado token de aplicacion, y
+   es el objeto central de este manual.
+
+   Cuando Forgejo necesita mandar un correo, ocurre internamente lo
+   siguiente. Primero abre una conexion TCP contra  smtp.gmail.com  en
+   el puerto 587. Sobre esa conexion negocia una capa TLS con el comando
+   STARTTLS para que la conversacion viaje cifrada. Una vez cifrada,
+   presenta usuario y App Password mediante el mecanismo AUTH LOGIN.
+   Gmail valida el par y, si es correcto, acepta el sobre del mensaje
+   ( MAIL FROM ) y los destinatarios ( RCPT TO ) y se queda a cargo de la
+   entrega. Forgejo cierra la sesion y registra el envio en su log.
+
+   El App Password no le da al portador acceso a leer la bandeja, ni a
+   cambiar la contrasena principal, ni a iniciar sesion por web. Es un
+   secreto de uso unico para SMTP e IMAP. Si se filtra, el dano queda
+   acotado a envios de correo a nombre de la cuenta, y se puede revocar
+   en un clic sin afectar la contrasena principal. Por eso es el metodo
+   recomendado para servidores como Forgejo.
+
+
+------------------------------------------------------------------------------
+Capitulo 2. Que requisitos exige Google
+------------------------------------------------------------------------------
+
+Proposito.
+   Verificar antes de empezar que la cuenta cumple las precondiciones, ya
+   que de otro modo el menu de App Passwords no aparece y el operador
+   pierde tiempo buscandolo.
+
+Requisitos.
+   La cuenta puede ser Gmail personal ( @gmail.com ) o Google Workspace
+   con dominio propio. En cualquiera de los dos casos Google exige:
+
+   1) Que la cuenta tenga activada la verificacion en dos pasos. Sin
+      verificacion en dos pasos, la opcion de App Passwords queda oculta
+      en el panel.
+
+   2) Que la cuenta no este protegida por el Programa de Proteccion
+      Avanzada. Ese programa, pensado para periodistas y activistas,
+      desactiva por completo los App Passwords. Si la cuenta lo tiene,
+      hay que salirse del programa o usar otra cuenta.
+
+   3) Si la cuenta es de Google Workspace, que el administrador del
+      dominio no haya bloqueado los App Passwords desde la consola
+      admin.google.com en  Security -> Less secure apps  o  API Controls .
+      En cuentas Workspace recien creadas la opcion suele estar permitida,
+      pero conviene confirmarlo antes.
+
+
+------------------------------------------------------------------------------
+ Activacion de la verificacion en dos pasos
+------------------------------------------------------------------------------
+Procedimiento.
+   El operador inicia sesion en la cuenta de correo desde un navegador y
+   abre la siguiente URL:
+
+       https://myaccount.google.com/security
+
+   En la seccion  How you sign in to Google  ( en espanol  Como inicias
+   sesion en Google ) localiza la fila  2-Step Verification  ( Verificacion
+   en dos pasos ). Si dice  On  el paso esta completo y se puede saltar al
+   capitulo 4. Si dice  Off , se entra a la fila y se pulsa  Get Started .
+
+   Google pide la contrasena de la cuenta y a continuacion pide registrar
+   un segundo factor. Las opciones, en orden de preferencia para un
+   servidor productivo, son:
+
+   - Aplicacion autenticadora ( Google Authenticator, Authy, 1Password ).
+     Es la mas robusta y no depende de la red telefonica.
+   - Codigos por SMS al telefono.
+
+Verificacion.
+   De vuelta en  https://myaccount.google.com/security  la fila
+   2-Step Verification  debe decir  On  con la fecha en que se activo.
+
+
+------------------------------------------------------------------------------
+Generacion del App Password
+------------------------------------------------------------------------------
+
+Proposito.
+   Producir el token de dieciseis caracteres que Forgejo presentara a
+   Gmail como contrasena SMTP.
+
+Procedimiento.
+   Con la verificacion en dos pasos activa, el operador abre directamente
+   la pagina
+
+       https://myaccount.google.com/apppasswords
+
+   Google pide reautenticar la contrasena de la cuenta y muestra el
+   formulario de generacion. En cuentas Workspace antiguas el formulario
+   pide elegir  App  y  Device  de listas desplegables; en cuentas
+   recientes pide solo un nombre libre. En ambos casos, el nombre que se
+   escribe es solo una etiqueta para que el operador recuerde donde se
+   uso el token. Se sugiere escribir literalmente:
+
+       Forgejo Clever Cloud - gitserver
+
+   Al pulsar  Create  ( Crear ), Google genera y muestra una sola vez un
+   bloque de dieciseis caracteres separado en cuatro grupos de cuatro,
+   por ejemplo:
+
+       abcd efgh ijkl mnop
+
+   El operador copia ese bloque al portapapeles  inmediatamente . La
+   pagina deja claro que el valor no se podra volver a consultar; si se
+   pierde, hay que generar uno nuevo. Los espacios entre grupos son
+   decorativos; Forgejo acepta el valor con o sin espacios, pero por
+   higiene se guarda sin espacios.
+
+

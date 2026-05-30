@@ -1,0 +1,333 @@
+==============================================================================
+                        DOCUMENTACION TECNICA
+              Servidor Git Interno - Forgejo en DigitalOcean
+                          Clever Cloud
+==============================================================================
+
+Este documento describe la arquitectura tecnica del servidor Git
+interno de Clever Cloud. Sirve como referencia para el equipo de
+DevOps/infra y para cualquier persona que necesite entender como
+esta montado el servicio, donde viven los datos y como se opera.
+
+
+==============================================================================
+1. ARQUITECTURA GENERAL
+==============================================================================
+
+El servidor expone una sola URL publica para todo el equipo:
+
+   https://gitserver.clevercloud.app
+
+Detras de esa URL hay un droplet de DigitalOcean (Ubuntu) corriendo
+tres contenedores Docker orquestados por docker-compose:
+
+   - caddy        Reverse proxy con HTTPS automatico (Let's Encrypt).
+   - server       Forgejo (la aplicacion Git).
+   - db           PostgreSQL 15 (base de datos de Forgejo).
+
+El trafico HTTPS entra por Caddy en el puerto 443, se enruta a
+Forgejo en el puerto interno 3000, y Forgejo persiste su estado
+en PostgreSQL y en el volumen ./forgejo_data (repositorios, LFS,
+adjuntos, configuracion).
+
+El trafico SSH entra directamente al contenedor de Forgejo por
+el puerto 222 del droplet, mapeado al puerto 22 interno del
+contenedor.
+
+
+==============================================================================
+2. STACK TECNOLOGICO
+==============================================================================
+
+   Componente            Tecnologia             Version
+   ------------------------------------------------------------
+   Reverse proxy         Caddy                  2.x
+   Servidor Git          Forgejo                15 (codeberg.org)
+   Base de datos         PostgreSQL             15-alpine
+   Orquestador           Docker Compose         v2
+   Sistema operativo     Ubuntu                 22.04 LTS
+   Hosting               DigitalOcean Droplet
+   Dominio / DNS         gitserver.clevercloud.app
+   Certificado TLS       Let's Encrypt (auto via Caddy)
+
+
+==============================================================================
+3. INFRAESTRUCTURA EN DIGITALOCEAN
+==============================================================================
+
+   Recurso              Configuracion
+   ------------------------------------------------------------
+   Droplet              Ubuntu 22.04 LTS
+   Region               configurada por el ingeniero en jefe
+   Backups              automaticos diarios (DO snapshots)
+   Cloud Firewall       puertos 80, 443, 222 (y 22 admin)
+   DNS                  registro A para gitserver.clevercloud.app
+   Almacenamiento       disco del droplet + backups DO
+
+Puertos abiertos en el firewall:
+
+   - 80    HTTP (Caddy lo usa para validar Let's Encrypt)
+   - 443   HTTPS (trafico web normal)
+   - 222   SSH Git (clonar/push por SSH a Forgejo)
+   - 22    SSH admin (acceso a la maquina, restringido por IP)
+
+
+==============================================================================
+4. ESTRUCTURA DE ARCHIVOS EN EL DROPLET
+==============================================================================
+
+Todo el despliegue vive bajo un directorio raiz (tipicamente en
+/opt/clever-forgejo o el home del usuario admin). La estructura es:
+
+   .
+   |-- docker-compose.prod.yml    Definicion de servicios.
+   |-- .env                       Variables sensibles (NO en git).
+   |-- forgejo_data/              Volumen de Forgejo: repos, LFS,
+   |                              adjuntos, configuracion app.ini.
+   |-- postgres_data/             Volumen de la base de datos.
+   |-- infra/
+   |   |-- caddy/
+   |   |   |-- Caddyfile          Config del reverse proxy.
+   |   |   |-- data/              Certificados y estado de Caddy.
+   |   |   |-- config/            Estado adicional de Caddy.
+   |-- docs/                      Manuales y guias (no obligatorios
+                                  en el droplet, pero conviene
+                                  tenerlos).
+
+
+==============================================================================
+5. VARIABLES DE ENTORNO CRITICAS (.env)
+==============================================================================
+
+El archivo .env vive en el droplet y NO se versiona. Contiene:
+
+   FORGEJO_DOMAIN              gitserver.clevercloud.app
+   FORGEJO_SSH_PORT            222
+   FORGEJO_LFS_JWT_SECRET      (secreto generado, no rotar sin
+                                migrar la configuracion LFS)
+   FORGEJO_SECRET_KEY          (secreto de cookies)
+   FORGEJO_INTERNAL_TOKEN      (secreto de comunicacion interna)
+   FORGEJO_GIT_MIGRATE_TIMEOUT 600
+
+   POSTGRES_USER               forgejo
+   POSTGRES_PASSWORD           (secreto)
+   POSTGRES_DB                 forgejo
+
+   SMTP_HOST                   smtp.gmail.com (o el proveedor usado)
+   SMTP_PORT                   587
+   SMTP_USER                   notificaciones@clevercloud.mx
+   SMTP_PASS                   (App Password, no contrasena normal)
+   SMTP_FROM                   "Clever Cloud Git <noreply@...>"
+
+Importante: si alguno de estos valores se rota, hay que recrear el
+contenedor server para que tome el cambio. Ver "Operaciones comunes".
+
+
+==============================================================================
+6. SEGURIDAD Y POLITICAS DE ACCESO
+==============================================================================
+
+   Politica                          Estado
+   ------------------------------------------------------------
+   Registro publico abierto          DESHABILITADO
+   Boton "Sign Up"                   OCULTO
+   Confirmacion de correo            REQUERIDA
+   Acceso anonimo a repos            BLOQUEADO
+   Cookies seguras (Secure flag)     SI
+   2FA disponible                    SI
+   2FA forzado por politica          OPCIONAL (recomendado)
+   SSH key requerido para push SSH   SI
+   PAT requerido para push HTTPS     SI (no se acepta contrasena)
+
+Los usuarios entran por dos mecanismos:
+
+   - Cuentas creadas por el admin con contrasena temporal
+     (clever4312 por defecto) y MUST_CHANGE_PASSWORD activo.
+   - Cuentas creadas por flujo de invitacion (no recomendado:
+     hay bug conocido en Forgejo 15 cuando DISABLE_REGISTRATION
+     esta activo; ver bloque de bugs conocidos).
+
+El flujo recomendado de creacion de cuenta es el de 2 pasos:
+   1. Admin crea la cuenta con email + contrasena temporal.
+   2. Admin agrega al usuario al team correspondiente.
+   3. Usuario hace login, cambia contrasena, completa perfil.
+
+
+==============================================================================
+7. BASE DE DATOS
+==============================================================================
+
+   Motor                  PostgreSQL 15-alpine
+   Nombre de la base      ${POSTGRES_DB}  (por defecto: forgejo)
+   Usuario de la base     ${POSTGRES_USER}
+   Volumen persistente    ./postgres_data
+   Healthcheck            pg_isready cada 10 segundos
+
+La base contiene todos los metadatos de Forgejo: usuarios,
+sesiones, organizaciones, teams, issues, PRs, webhooks, tokens.
+Los archivos binarios de los repositorios NO viven en la base;
+viven en el volumen ./forgejo_data.
+
+Backups de la base:
+   - Dump automatico nocturno via cron.
+   - Comando recomendado:
+     docker exec clevercloud-forgejo-db pg_dump -U forgejo forgejo \
+        > /var/backups/forgejo/db_$(date +%F).sql
+   - Retencion: 30 dias rotativos.
+
+
+==============================================================================
+8. BACKUPS Y RESTAURACION
+==============================================================================
+
+Politica de backup actual:
+
+   - Snapshots automaticos de DigitalOcean (nivel droplet).
+   - Dump nocturno de PostgreSQL en /var/backups/forgejo/.
+   - Backup del volumen ./forgejo_data via tar (recomendado
+     semanal, dado el tamano).
+
+Procedimiento de restauracion:
+
+   - Para base de datos:
+        1. Detener el contenedor server.
+        2. Restaurar el dump:
+           docker exec -i clevercloud-forgejo-db psql -U forgejo forgejo < dump.sql
+        3. Levantar el contenedor server.
+
+   - Para repositorios:
+        1. Detener todos los contenedores.
+        2. Restaurar ./forgejo_data desde el tar/snapshot.
+        3. Levantar el stack.
+
+   - Para droplet completo:
+        Usar restore desde snapshot de DigitalOcean. Tarda 5-15
+        minutos segun tamano.
+
+
+==============================================================================
+9. CORREO Y NOTIFICACIONES (SMTP)
+==============================================================================
+
+Forgejo envia correos para:
+
+   - Confirmacion de email en alta de cuenta.
+   - Recuperacion de contrasena.
+   - Notificaciones de PRs, issues y menciones.
+   - Alertas de seguridad (cambio de email, contrasena, 2FA).
+
+Proveedor SMTP recomendado:
+   - Cuenta Gmail Workspace con App Password.
+   - O servicio transaccional (SendGrid, Mailgun, AWS SES).
+
+Variables del .env relacionadas: SMTP_HOST, SMTP_PORT, SMTP_USER,
+SMTP_PASS, SMTP_FROM.
+
+Si el SMTP falla, las invitaciones masivas no pueden enviarse.
+El plan de contingencia es crear cuentas via CLI con contrasena
+temporal y avisar a los usuarios por otro canal (Slack, correo
+desde otra cuenta).
+
+
+==============================================================================
+10. OPERACIONES COMUNES
+==============================================================================
+
+Recrear el contenedor de Forgejo (despues de cambiar .env):
+
+   docker compose -f docker-compose.prod.yml up -d --force-recreate server
+
+Recrear todo el stack:
+
+   docker compose -f docker-compose.prod.yml up -d --force-recreate
+
+Ver logs en vivo:
+
+   docker logs -f clevercloud-forgejo
+   docker logs -f clevercloud-caddy
+   docker logs -f clevercloud-forgejo-db
+
+Crear un usuario por CLI (cuando SMTP esta caido):
+
+   docker exec -it clevercloud-forgejo forgejo admin user create \
+      --username angel \
+      --email angel@clevercloud.mx \
+      --password clever4312 \
+      --must-change-password \
+      --admin=false
+
+Listar usuarios:
+
+   docker exec -it clevercloud-forgejo forgejo admin user list
+
+Cambiar contrasena de un usuario:
+
+   docker exec -it clevercloud-forgejo forgejo admin user change-password \
+      --username angel --password nuevaPassword
+
+
+==============================================================================
+11. BUGS CONOCIDOS Y WORKAROUNDS
+==============================================================================
+
+Bug 1 - Invitaciones rotas con DISABLE_REGISTRATION=true.
+   Sintoma - el boton "Invite Someone" lanza error 404 o pantalla
+   en blanco. Es un bug de Forgejo 15 cuando el registro publico
+   esta deshabilitado.
+   Workaround - usar el flujo de 2 pasos: crear cuenta por CLI/UI
+   admin, agregar al team manualmente.
+
+Bug 2 - Pull mirror con LFS no replica blobs nuevos.
+   Sintoma - el repo se ve en Forgejo pero los archivos LFS
+   referenciados no estan presentes.
+   Workaround - clonar el repo fresco desde Bitbucket con
+   git lfs fetch --all, en lugar de usar pull mirror para repos
+   con LFS pesado.
+
+Bug 3 - El campo "Old Password" no aparece en el cambio forzado
+del primer login.
+   No es bug, es el comportamiento esperado: Forgejo no pide la
+   contrasena vieja cuando MUST_CHANGE_PASSWORD esta activo, solo
+   pide la nueva dos veces.
+
+
+==============================================================================
+12. MONITOREO MINIMO RECOMENDADO
+==============================================================================
+
+   - Healthcheck del endpoint /api/healthz (ya configurado en
+     docker-compose, lo lee Docker).
+   - Alerta de uso de disco > 80% en el droplet.
+   - Alerta de CPU sostenida > 80% durante 5 minutos.
+   - Verificacion semanal de que los backups se generan.
+   - Test mensual de restauracion en un droplet de prueba.
+
+
+==============================================================================
+13. RUNBOOK DE INCIDENTES BASICO
+==============================================================================
+
+Sintoma - el sitio devuelve 502 Bad Gateway.
+   Causa probable - Forgejo no esta corriendo o esta arrancando.
+   Accion - docker ps; si el contenedor server no esta UP, mirar
+   sus logs y reiniciar.
+
+Sintoma - "Internal Server Error" al iniciar sesion.
+   Causa probable - la base de datos esta caida o sin conexion.
+   Accion - docker ps; verificar el contenedor db; mirar sus logs.
+
+Sintoma - los correos no llegan.
+   Causa probable - SMTP mal configurado o App Password expirado.
+   Accion - revisar logs del contenedor server filtrando por
+   "mailer"; validar credenciales en el .env.
+
+Sintoma - el push por SSH falla con "Permission denied".
+   Causa probable - llave SSH no cargada o usando puerto 22 en
+   lugar de 222.
+   Accion - validar que la URL del remote use :222 o que la
+   config SSH del cliente tenga Port 222 para ese host.
+
+
+==============================================================================
+                          FIN DEL DOCUMENTO
+==============================================================================
