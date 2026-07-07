@@ -142,7 +142,7 @@ contenedor server para que tome el cambio. Ver "Operaciones comunes".
 Los usuarios entran por dos mecanismos:
 
    - Cuentas creadas por el admin con contrasena temporal
-     (clever4312 por defecto) y MUST_CHANGE_PASSWORD activo.
+     (CHANGE_ME por defecto) y MUST_CHANGE_PASSWORD activo.
    - Cuentas creadas por flujo de invitacion (no recomendado:
      hay bug conocido en Forgejo 15 cuando DISABLE_REGISTRATION
      esta activo; ver bloque de bugs conocidos).
@@ -252,7 +252,7 @@ Crear un usuario por CLI (cuando SMTP esta caido):
    docker exec -it clevercloud-forgejo forgejo admin user create \
       --username angel \
       --email angel@clevercloud.mx \
-      --password clever4312 \
+      --password CHANGE_ME \
       --must-change-password \
       --admin=false
 

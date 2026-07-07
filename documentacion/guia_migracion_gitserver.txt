@@ -27,7 +27,7 @@ oficial del switchover.
       El MISMO correo electronico que usabas en Bitbucket.
 
    Tu contrasena temporal (solo el primer login):
-      clever4312
+      CHANGE_ME
 
    Puerto SSH del servidor:
       222 (no es el 22 estandar)
@@ -66,7 +66,7 @@ electronico que usas en Bitbucket. No uses un correo distinto, ese
 es el que ya esta asociado a tu cuenta.
 
    Usuario / Email:  tu.correo@clevercloud.mx
-   Contrasena:       clever4312
+   Contrasena:       CHANGE_ME
 
 Da clic en "Sign In" para continuar.
 

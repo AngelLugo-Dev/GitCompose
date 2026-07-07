@@ -1,0 +1,2 @@
+# ponytail: prevent accidental commit of real secrets
+.env

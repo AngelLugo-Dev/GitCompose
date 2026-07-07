@@ -872,7 +872,7 @@ solicita credenciales en cada operacion una vez configurado.
       normales de clone, pull y push; opcionalmente marcar  read:issue
       y  write:issue  si el usuario va a interactuar con issues
       desde la CLI o un script. Generar el token. Forgejo muestra
-      el token una unica vez, en el formato  gho_aBcDeF1234... ; ese
+      el token una unica vez, en el formato  gho_... ; ese
       es el momento de copiarlo al gestor de contrasenas, ya que no
       vuelve a ser visible.
 

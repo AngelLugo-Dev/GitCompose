@@ -128,7 +128,7 @@ Procedimiento.
    bloque de dieciseis caracteres separado en cuatro grupos de cuatro,
    por ejemplo:
 
-       abcd efgh ijkl mnop
+       abcd efgh ijkl mnop  # ponytail: example format, not a real token
 
    El operador copia ese bloque al portapapeles  inmediatamente . La
    pagina deja claro que el valor no se podra volver a consultar; si se

@@ -21,7 +21,7 @@ servidor, sino una referencia de lo que SE PUEDE HACER en el.
 
    Cambio de contrasena en primer login.
       La primera vez que un usuario entra con su contrasena
-      temporal (clever4312), el sistema lo redirige a cambiarla
+      temporal (CHANGE_ME), el sistema lo redirige a cambiarla
       por una propia. Es obligatorio, no se puede saltar.
 
    Autenticacion en dos pasos (2FA).

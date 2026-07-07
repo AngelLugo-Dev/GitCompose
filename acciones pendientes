@@ -254,7 +254,7 @@ Procedimiento paso a paso.
            Despues:
 
                SMTP_USER=devops@clevercloud.mx
-               SMTP_PASS=abcdefghijklmnop
+               SMTP_PASS=CHANGE_ME
                SMTP_FROM="Clever Cloud Git <devops@clevercloud.mx>"
 
            Notas. El App Password se introduce sin espacios, aunque
